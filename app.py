@@ -410,7 +410,7 @@ if (rnflt_file is not None) or (bscan_file is not None):
         pdf_bytes = create_pdf_bytes(figs_for_report)
         st.markdown('<div class="download-btns">', unsafe_allow_html=True)
         st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
-        st.download_button("📄 Download Full Report (PDF)", data=pdf_bytes, file_name="oculaire_report.pdf", mime="application/pdf")
+        st.download_button("📄 Download Full Report (PDF)", data=pdf_name, mime="application/pdf")
         st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("<hr>", unsafe_allow_html=True)
@@ -446,6 +446,8 @@ if st.session_state.chat_visible:
     # Render chat messages
     for msg in st.session_state.chat_messages[-40:]:
         if msg["role"] == "user":
+            # NOTE: Using st.markdown.__wrapped__ and '' is a common Streamlit trick
+            # to render a string-formatted HTML block reliably.
             st.markdown(f"<div class='user-message'>{st.markdown.__wrapped__ and ''}{msg['content']}</div>", unsafe_allow_html=True)
         else:
             st.markdown(f"<div class='ai-message'>{msg['content']}</div>", unsafe_allow_html=True)
