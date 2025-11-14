@@ -7,3 +7,4 @@ joblib
 matplotlib
 opencv-python-headless
 Pillow
+google-genai
