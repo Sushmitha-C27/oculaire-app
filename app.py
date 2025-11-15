@@ -1,44 +1,34 @@
-# app.py - OCULAIRE Neon Lab v5 (completed, safe chatbot fallback, downloads, neon UI)
-import os
-import io
-import time
-import base64
-import joblib
+# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot
+import streamlit as st
 import numpy as np
-import matplotlib.pyplot as plt
+import joblib
 import tensorflow as tf
+import matplotlib.pyplot as plt
 from PIL import Image
 import cv2
+import io
 from matplotlib.backends.backend_pdf import PdfPages
-import streamlit as st
-import streamlit.components.v1 as components
+import requests
+import json
 
 # -----------------------
-# Optional Gemini import (safe)
-# -----------------------
-genai = None
-try:
-    import google.generativeai as genai  # optional; will fail gracefully when not available
-except Exception:
-    genai = None
-
-# -----------------------
-# Safe API key retrieval
-# -----------------------
-try:
-    if 'gemini' in st.secrets and 'api_key' in st.secrets['gemini']:
-        GEMINI_API_KEY = st.secrets['gemini']['api_key']
-    else:
-        GEMINI_API_KEY = os.environ.get("GENAI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or None
-except Exception:
-    GEMINI_API_KEY = os.environ.get("GENAI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or None
-
-# -----------------------
-# Streamlit page config and plotting defaults
+# Page Config
 # -----------------------
 st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
-                   layout="wide", page_icon="👁️")
+                   layout="wide",
+                   page_icon="👁️")
 
+# -----------------------
+# Initialize Session State for Chat
+# -----------------------
+if 'chat_open' not in st.session_state:
+    st.session_state.chat_open = False
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
+
+# -----------------------
+# Neon Matplotlib Config
+# -----------------------
 plt.style.use('dark_background')
 plt.rcParams.update({
     "figure.facecolor": "#050612",
@@ -53,89 +43,162 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# Neon CSS + Floating Chat Bubble
+# CSS — Neon Theme + Animations + Chatbot
 # -----------------------
-st.markdown(
-    """
-    <style>
-    :root {
-      --bg:#020208;
-      --panel:#0a0f25;
-      --neonA:#00f5ff;
-      --neonB:#ff40c4;
-      --muted:#a4b1c9;
-    }
-    .stApp { background: radial-gradient(circle at 20% 20%, #091133, #020208 90%); color: #e6faff; font-family: 'Plus Jakarta Sans', Inter, system-ui; }
+st.markdown("""
+<style>
+:root {
+  --bg:#020208;
+  --panel:#0a0f25;
+  --neonA:#00f5ff;
+  --neonB:#ff40c4;
+  --muted:#a4b1c9;
+}
+.stApp {
+  background: radial-gradient(circle at 20% 20%, #091133, #020208 90%);
+  color: #e6faff;
+  font-family: 'Plus Jakarta Sans', Inter, system-ui;
+}
+.header { text-align:center; margin-top:10px; margin-bottom:10px; }
+.header h1 {
+  font-size:42px; font-weight:900; letter-spacing:3px;
+  background: linear-gradient(90deg, var(--neonA), var(--neonB));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  text-shadow: 0 0 20px rgba(0,245,255,0.8), 0 0 35px rgba(255,64,196,0.5);
+}
+.header h3 { color:var(--muted); font-weight:400; font-size:15px; text-shadow: 0 0 12px rgba(255,255,255,0.2); }
+.card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  border:1px solid rgba(255,255,255,0.05);
+  box-shadow: 0 0 25px rgba(0,245,255,0.05), 0 0 35px rgba(255,64,196,0.05);
+  border-radius:12px; padding:16px;
+}
+.metric-label { color:var(--muted); font-size:12px; }
+.large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.5); }
 
-    /* Header */
-    .header { text-align:center; margin-top:8px; margin-bottom:6px; }
-    .header h1 { font-size:42px; font-weight:900; letter-spacing:3px;
-      background: linear-gradient(90deg, var(--neonA), var(--neonB));
-      -webkit-background-clip:text; -webkit-text-fill-color:transparent;
-      text-shadow: 0 0 20px rgba(0,245,255,0.7), 0 0 35px rgba(255,64,196,0.4);
-    }
-    .header h3 { color:var(--muted); font-weight:400; font-size:14px; }
+/* Severity Bar */
+.sev-wrap { margin-top:16px; }
+.sev-outer { height:18px; width:100%; background: rgba(255,255,255,0.05); border-radius:14px; overflow:hidden; }
+.sev-inner {
+  height:100%; width:0%;
+  background: linear-gradient(90deg,var(--neonA),var(--neonB));
+  border-radius:14px;
+  box-shadow: 0 0 25px rgba(0,245,255,0.6), 0 0 25px rgba(255,64,196,0.5);
+  transition: width 1s ease-in-out;
+}
+.sev-chip {
+  margin-top:6px; display:inline-block;
+  padding:6px 12px; border-radius:12px;
+  font-weight:800; font-size:14px; color:#021617;
+  background: linear-gradient(90deg, rgba(0,245,255,0.9), rgba(255,64,196,0.9));
+  box-shadow: 0 0 20px rgba(0,245,255,0.4), 0 0 20px rgba(255,64,196,0.3);
+  animation: pulse 1.8s infinite;
+}
+@keyframes pulse { 0%{transform:scale(1);} 50%{transform:scale(1.06);} 100%{transform:scale(1);} }
+.download-btns { margin-top:14px; display:flex; gap:10px; justify-content:center; }
 
-    /* Cards */
-    .card { background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
-      border:1px solid rgba(255,255,255,0.04); box-shadow: 0 0 25px rgba(0,245,255,0.04);
-      border-radius:12px; padding:14px; }
-    .uploader-card { background:#0d1720; padding:12px; border-radius:8px; border:1px solid rgba(255,255,255,0.03); }
+/* Chatbot Button */
+.chat-fab {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--neonA), var(--neonB));
+  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 30px rgba(255,64,196,0.4);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  z-index: 1000;
+  animation: float 3s ease-in-out infinite;
+  border: none;
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+.chat-fab:hover {
+  box-shadow: 0 0 40px rgba(0,245,255,0.8), 0 0 40px rgba(255,64,196,0.6);
+  transform: scale(1.1);
+}
 
-    .metric-label { color:var(--muted); font-size:12px; }
-    .large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.35); }
-
-    /* Severity bar */
-    .sev-wrap { margin-top:12px; }
-    .sev-outer { height:18px; width:100%; background: rgba(255,255,255,0.04); border-radius:14px; overflow:hidden; }
-    .sev-inner { height:100%; width:0%; background: linear-gradient(90deg,var(--neonA),var(--neonB));
-      border-radius:14px; box-shadow: 0 0 25px rgba(0,245,255,0.55); transition: width 1s cubic-bezier(.2,.9,.2,1); }
-    .sev-chip { margin-top:8px; display:inline-block; padding:6px 12px; border-radius:12px; font-weight:800; font-size:14px; color:#021617;
-      background: linear-gradient(90deg, rgba(0,245,255,0.95), rgba(255,64,196,0.95)); box-shadow: 0 0 20px rgba(0,245,255,0.3); animation: pulse 1.6s infinite; }
-    @keyframes pulse { 0%{transform:scale(1);} 50%{transform:scale(1.05);} 100%{transform:scale(1);} }
-
-    /* download buttons */
-    .download-btns { margin-top:10px; display:flex; gap:10px; justify-content:flex-start; }
-
-    /* Floating Chatbot */
-    .chat-bubble-wrapper { position: fixed; bottom: 20px; left: 20px; z-index:999; display:flex; flex-direction:column; align-items:flex-start; gap:8px; }
-    .chat-bubble { width:64px; height:64px; border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer;
-      background: linear-gradient(135deg, var(--neonA), var(--neonB)); color:#021617; box-shadow: 0 8px 30px rgba(0,245,255,0.18); font-size:28px; border: 2px solid rgba(255,255,255,0.06);}
-    .chat-window { width:360px; height:460px; background:var(--panel); border-radius:12px; padding:0; box-shadow:0 12px 40px rgba(0,0,0,0.7);}
-    .chat-header { padding:10px; background: linear-gradient(90deg,#091133,var(--panel)); color:var(--neonA); font-weight:700; border-radius:12px 12px 0 0; display:flex; justify-content:space-between; align-items:center; }
-    .chat-history { padding:10px; height:340px; overflow-y:auto; background:rgba(0,0,0,0.02); }
-    .user-message { text-align:right; margin:6px 0; padding:8px 10px; background: rgba(0,245,255,0.08); border-radius:10px; color:#e6faff; display:inline-block; max-width:85%; }
-    .ai-message { text-align:left; margin:6px 0; padding:8px 10px; background: rgba(255,64,196,0.06); border-radius:10px; color:#e6faff; display:inline-block; max-width:85%; }
-    .chat-input-area { padding:8px; border-top:1px solid rgba(255,255,255,0.03); display:flex; gap:6px; align-items:center; }
-    .chat-input { flex:1; padding:8px 10px; border-radius:8px; background:#06090f; color:#e6faff; border:1px solid rgba(255,255,255,0.03); }
-
-    /* Hide the hidden toggle button's container (we will hide it with JS too) */
-    .hidden-toggle-replacement { display:none !important; }
-
-    footer { visibility:hidden; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+footer { visibility:hidden; }
+</style>
+""", unsafe_allow_html=True)
 
 # -----------------------
-# Header UI
+# Chatbot Function
 # -----------------------
-st.markdown(
-    """
-    <div class="header">
-      <h1>👁️ OCULAIRE</h1>
-      <h3>AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</h3>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+def ask_glaucoma_assistant(question, history):
+    """Call Claude API with glaucoma-specific context"""
+    try:
+        # Build conversation history
+        messages = []
+        for msg in history:
+            messages.append({"role": msg["role"], "content": msg["content"]})
+        messages.append({"role": "user", "content": question})
+        
+        # System prompt to constrain responses to glaucoma topics
+        system_prompt = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
+        
+Your role:
+- Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment
+- Provide accurate, evidence-based information about glaucoma
+- Explain medical terminology clearly
+- If asked about non-glaucoma topics, politely redirect to glaucoma-related questions
+- Always include a disclaimer that you're providing educational information, not medical advice
+
+Important disclaimers:
+- Remind users to consult healthcare professionals for medical decisions
+- Never diagnose or provide treatment recommendations
+- Focus on education and information about glaucoma"""
+
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "Content-Type": "application/json",
+                "anthropic-version": "2023-06-01"
+            },
+            json={
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 1000,
+                "system": system_prompt,
+                "messages": messages
+            }
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            assistant_message = ""
+            for block in data.get("content", []):
+                if block.get("type") == "text":
+                    assistant_message += block.get("text", "")
+            return assistant_message
+        else:
+            return f"Sorry, I encountered an error (Status {response.status_code}). Please try again."
+            
+    except Exception as e:
+        return f"Sorry, I couldn't process your question: {str(e)}"
 
 # -----------------------
-# Load models & artifacts (cached)
+# Header
+# -----------------------
+st.markdown("""
+<div class="header">
+  <h1>👁️ OCULAIRE</h1>
+  <h3>AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</h3>
+</div>
+""", unsafe_allow_html=True)
+st.markdown("---")
+
+# -----------------------
+# Load Models
 # -----------------------
 @st.cache_resource
-def load_models_and_artifacts():
+def load_models():
     try:
         b_model = tf.keras.models.load_model("bscan_cnn.h5", compile=False)
     except Exception:
@@ -150,38 +213,36 @@ def load_models_and_artifacts():
         scaler = kmeans = avg_healthy = avg_glaucoma = thin_cluster = None
     return b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster
 
-b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models_and_artifacts()
+b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models()
 
 # -----------------------
-# Helper functions
+# Helpers
 # -----------------------
-def process_npz_file(f):
+def process_npz(f):
     try:
         buf = io.BytesIO(f.getvalue())
-        arrs = np.load(buf, allow_pickle=True)
-        key = "volume" if "volume" in arrs else arrs.files[0]
-        arr = arrs[key]
+        data = np.load(buf, allow_pickle=True)
+        arr = data["volume"] if "volume" in data else data[data.files[0]]
         if arr.ndim == 3:
             arr = arr[0, :, :]
         vals = arr.flatten().astype(float)
-        metrics = {"mean": float(np.nanmean(vals)), "std": float(np.nanstd(vals)),
-                   "min": float(np.nanmin(vals)), "max": float(np.nanmax(vals))}
-        return arr, metrics
+        m = {"mean": np.nanmean(vals), "std": np.nanstd(vals), "min": np.nanmin(vals), "max": np.nanmax(vals)}
+        return arr, m
     except Exception as e:
-        st.error(f"Could not read .npz: {e}")
+        st.error(f"Error reading NPZ: {e}")
         return None, None
 
-def compute_risk_map_local(rnflt_map, avg_map, threshold=-10):
-    if rnflt_map.shape != avg_map.shape:
-        avg_map = cv2.resize(avg_map, (rnflt_map.shape[1], rnflt_map.shape[0]))
-    diff = rnflt_map - avg_map
+def compute_risk_map(rnflt, healthy, threshold=-10):
+    if rnflt.shape != healthy.shape:
+        healthy = cv2.resize(healthy, (rnflt.shape[1], rnflt.shape[0]))
+    diff = rnflt - healthy
     risk = np.where(diff < threshold, diff, np.nan)
     total = np.isfinite(diff).sum()
     risky = np.isfinite(risk).sum()
-    severity = (risky / total) * 100 if total > 0 else 0.0
+    severity = (risky / total) * 100 if total else 0
     return diff, risk, severity
 
-def preprocess_bscan_image(image_pil, size=(224,224)):
+def preprocess_bscan(image_pil, size=(224,224)):
     arr = np.array(image_pil.convert('L'))
     arr = np.clip(arr, 0, np.percentile(arr, 99))
     arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-6)
@@ -190,14 +251,14 @@ def preprocess_bscan_image(image_pil, size=(224,224)):
     batch = np.expand_dims(arr_rgb, axis=0).astype(np.float32)
     return batch, arr_res
 
-def gradcam_local(batch, model):
+def gradcam(batch, model):
     try:
         last_conv = None
         for layer in reversed(model.layers):
             if isinstance(layer, (tf.keras.layers.Conv2D, tf.keras.layers.DepthwiseConv2D)):
                 last_conv = layer.name
                 break
-        if last_conv is None:
+        if not last_conv:
             return None
         grad_model = tf.keras.models.Model(model.inputs, [model.get_layer(last_conv).output, model.output])
         with tf.GradientTape() as tape:
@@ -213,322 +274,185 @@ def gradcam_local(batch, model):
     except Exception:
         return None
 
-def fig_to_png_bytes(fig):
+def fig_to_png(fig):
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches='tight', facecolor=fig.get_facecolor())
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor=fig.get_facecolor())
     buf.seek(0)
     return buf.getvalue()
 
-def create_pdf_bytes(figs):
+def create_pdf(figs):
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
         for f in figs:
-            pdf.savefig(f, bbox_inches='tight', facecolor=f.get_facecolor())
+            pdf.savefig(f, bbox_inches="tight", facecolor=f.get_facecolor())
     buf.seek(0)
     return buf.getvalue()
 
-def render_severity_html(pct):
-    pct = float(max(0.0, min(100.0, pct)))
+def render_severity(pct):
+    pct = max(0.0, min(100.0, float(pct)))
     html = f"""
     <div class='sev-wrap'>
-      <div class='sev-outer'><div id='sev_inner' class='sev-inner' style='width:0%'></div></div>
+      <div class='sev-outer'><div id='sev_inner' class='sev-inner'></div></div>
       <div style='text-align:center'><div class='sev-chip'>{pct:.1f}%</div></div>
     </div>
     <script>
       setTimeout(function(){{
-        var el = document.getElementById('sev_inner');
-        if(el) el.style.width = '{pct:.1f}%';
-      }}, 120);
+        var el=document.getElementById('sev_inner');
+        if(el) el.style.width='{pct:.1f}%';
+      }},150);
     </script>
     """
     return html
 
 # -----------------------
-# Chatbot initialization + fallback
+# LAYOUT
 # -----------------------
-DOMAIN = "Glaucoma"
-SYSTEM_INSTRUCTION_PROMPT = (
-    f"You are an expert assistant specialized in {DOMAIN}. "
-    "Only answer questions related to this domain. If a question is outside the domain, politely decline."
-)
+colA, colB = st.columns(2)
 
-if "chat_visible" not in st.session_state:
-    st.session_state.chat_visible = False
-if "chat_messages" not in st.session_state:
-    st.session_state.chat_messages = [{"role":"ai","content":f"Hello — I'm the {DOMAIN} Assistant. Ask me glaucoma-specific questions."}]
-if "chat_input" not in st.session_state:
-    st.session_state.chat_input = ""
-
-# Configure genai client if possible (non-blocking)
-if genai is not None and GEMINI_API_KEY:
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        st.session_state.genai_model = genai.GenerativeModel("models/gemini-2.5-pro")
-        st.session_state.genai_available = True
-    except Exception:
-        st.session_state.genai_available = False
-else:
-    st.session_state.genai_available = False
-
-def toggle_chat():
-    st.session_state.chat_visible = not st.session_state.chat_visible
-
-def submit_chat():
-    user_q = st.session_state.chat_input.strip()
-    if not user_q:
-        return
-    st.session_state.chat_messages.append({"role":"user","content":user_q})
-    # Fallback local responder if genai unavailable
-    if not st.session_state.get("genai_available", False):
-        low = user_q.lower()
-        if "what" in low and "glaucoma" in low:
-            reply = "Glaucoma is a group of eye diseases that damage the optic nerve — often associated with raised intraocular pressure — and can lead to vision loss if untreated."
-        elif "rnflt" in low or "retinal nerve" in low:
-            reply = "RNFLT = Retinal Nerve Fiber Layer Thickness measured with OCT; thinning can indicate glaucoma."
-        elif "b-scan" in low or "bscan" in low:
-            reply = "B-scan here refers to OCT cross-sections (B-scans) used by CNNs for detection — Grad-CAM helps interpret model focus."
-        else:
-            reply = "Sorry — in this demo I only answer glaucoma-specific questions. Try asking about RNFLT, B-scan, or glaucoma basics."
-        st.session_state.chat_messages.append({"role":"ai","content":reply})
-        st.session_state.chat_input = ""
-        return
-
-    # If genai available try to get AI reply (safe wrapper)
-    try:
-        model = st.session_state.genai_model
-        prompt = SYSTEM_INSTRUCTION_PROMPT + "\n\nUser: " + user_q
-        resp = model.generate_content(prompt)
-        ai_text = getattr(resp, "text", str(resp))
-    except Exception:
-        ai_text = "⚠️ AI service error or rate limit. Showing fallback message: I can only answer glaucoma-specific queries."
-    st.session_state.chat_messages.append({"role":"ai","content":ai_text})
-    st.session_state.chat_input = ""
-
-# -----------------------
-# Upload UI (main)
-# -----------------------
-left_col, right_col = st.columns([3, 1])
-with left_col:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
+with colA:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("🩺 RNFLT Map Analysis (.npz)")
-    rnflt_file = st.file_uploader("Upload RNFLT .npz", type=["npz"], label_visibility="visible")
+    rnflt_file = st.file_uploader("Upload RNFLT file", type=["npz"])
     st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="card" style="margin-top:12px">', unsafe_allow_html=True)
-    st.subheader("👁️ B-scan Slice Analysis (image)")
-    bscan_file = st.file_uploader("Upload B-scan image (jpg/png)", type=["jpg","png","jpeg"], label_visibility="visible")
+with colB:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("👁️ B-Scan Slice Analysis (Image)")
+    bscan_file = st.file_uploader("Upload B-Scan Image", type=["jpg","png","jpeg"])
     st.markdown("</div>", unsafe_allow_html=True)
 
-    threshold = st.slider("Thin-zone threshold (µm)", min_value=5, max_value=50, value=10)
-
-with right_col:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("<div class='metric-label'>Overview</div>", unsafe_allow_html=True)
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    if scaler is None:
-        st.markdown("<div class='metric-label'>RNFLT artifacts: <b style='color:#ff8a8a'>missing</b></div>", unsafe_allow_html=True)
-    else:
-        st.markdown("<div class='metric-label'>RNFLT artifacts: <b style='color:#8affd6'>loaded</b></div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
 # -----------------------
-# Analysis logic
+# ANALYSIS
 # -----------------------
-figs_for_report = []
-severity_overall = 0.0
-
-if rnflt_file is not None:
-    rnflt_map, metrics = process_npz_file(rnflt_file)
-    if rnflt_map is not None and avg_healthy is not None and scaler is not None:
-        X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
-        Xs = scaler.transform(X)
-        cluster = int(kmeans.predict(Xs)[0]) if kmeans is not None else -1
-        label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
-        diff, risk, sev = compute_risk_map_local(rnflt_map, avg_healthy, threshold=-threshold)
-        severity_overall = max(severity_overall, sev)
-
-        # Metrics row
-        c1, c2, c3, c4 = st.columns([2,2,2,1])
-        c1.markdown(f"<div class='metric-label'>Status</div><div class='large-metric'>{'🚨 ' if 'Glaucoma' in label_r else '✅ '}{label_r}</div>", unsafe_allow_html=True)
-        c2.markdown(f"<div class='metric-label'>Mean RNFLT (µm)</div><div class='large-metric'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
-        c3.markdown(f"<div class='metric-label'>Std Dev</div><div class='large-metric'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
-        c4.markdown(f"<div class='metric-label'>Cluster</div><div class='large-metric'>{cluster}</div>", unsafe_allow_html=True)
-
-        # Severity bar
-        st.markdown(render_severity_html(sev), unsafe_allow_html=True)
-
-        # Single figure (1x3)
-        fig, axes = plt.subplots(1,3,figsize=(15,5), constrained_layout=True)
-        im0 = axes[0].imshow(rnflt_map, cmap='turbo'); axes[0].set_title("Uploaded RNFLT"); axes[0].axis('off')
-        c0 = fig.colorbar(im0, ax=axes[0], fraction=0.05)
-        im1 = axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30); axes[1].set_title("Difference (vs Healthy)"); axes[1].axis('off')
-        c1 = fig.colorbar(im1, ax=axes[1], fraction=0.05)
-        im2 = axes[2].imshow(risk, cmap='hot'); axes[2].set_title("Risk Map (thinner zones)"); axes[2].axis('off')
-        c2 = fig.colorbar(im2, ax=axes[2], fraction=0.05)
-        fig.patch.set_facecolor("#050612")
-        for ax in axes: ax.set_facecolor("#050612")
-        st.pyplot(fig)
-        figs_for_report.append(fig)
-
-if bscan_file is not None and b_model is not None:
-    image_pil = Image.open(bscan_file).convert("L")
-    batch, proc = preprocess_bscan_image(image_pil)
-    try:
-        pred_raw = float(b_model.predict(batch, verbose=0)[0][0])
-    except Exception:
-        pred_raw = 0.0
-    label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
-    conf = pred_raw*100 if label_b == "Glaucoma-like" else (1 - pred_raw)*100
-    severity_overall = max(severity_overall, conf)
-
+if rnflt_file or bscan_file:
+    figs = []
+    severity_overall = 0
     st.markdown("<hr>", unsafe_allow_html=True)
-    m1, m2 = st.columns(2)
-    m1.markdown(f"<div class='metric-label'>CNN Prediction</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
-    m2.markdown(f"<div class='metric-label'>Confidence</div><div class='large-metric'>{conf:.2f}%</div>", unsafe_allow_html=True)
-    st.markdown(render_severity_html(conf), unsafe_allow_html=True)
 
-    heat = gradcam_local(batch, b_model)
-    if heat is not None:
-        heat_r = cv2.resize(heat, (224,224))
-        hm = (heat_r * 255).astype(np.uint8)
-        hm_color = cv2.applyColorMap(hm, cv2.COLORMAP_JET)
-        overlay = (np.stack([proc]*3, axis=-1) * 255).astype(np.uint8)
-        overlay = cv2.addWeighted(overlay, 0.6, hm_color, 0.4, 0)
-        st.image([image_pil, overlay], caption=["Original B-scan", "Grad-CAM Overlay"], use_column_width=True)
-        fig2, ax2 = plt.subplots(1,2,figsize=(8,4)); ax2[0].imshow(image_pil, cmap='gray'); ax2[0].axis('off'); ax2[0].set_title("Original")
-        ax2[1].imshow(overlay); ax2[1].axis('off'); ax2[1].set_title("Grad-CAM Overlay")
-        fig2.patch.set_facecolor("#050612")
-        figs_for_report.append(fig2)
+    # RNFLT Processing
+    if rnflt_file and scaler is not None:
+        rnflt, metrics = process_npz(rnflt_file)
+        if rnflt is not None:
+            X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
+            Xs = scaler.transform(X)
+            cluster = int(kmeans.predict(Xs)[0])
+            label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
+            diff, risk, sev = compute_risk_map(rnflt, avg_healthy, -threshold)
+            severity_overall = max(severity_overall, sev)
+            m1, m2, m3, m4 = st.columns([2,2,2,2])
+            m1.markdown(f"<div class='metric-label'>Status</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_r else '✅'} {label_r}</div>", unsafe_allow_html=True)
+            m2.markdown(f"<div class='metric-label'>Mean RNFLT</div><div class='large-metric'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
+            m3.markdown(f"<div class='metric-label'>Std Dev</div><div class='large-metric'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
+            m4.markdown(f"<div class='metric-label'>Cluster</div><div class='large-metric'>{cluster}</div>", unsafe_allow_html=True)
 
-# Combined severity summary + downloads
-if (rnflt_file is not None) or (bscan_file is not None):
+            st.markdown(render_severity(sev), unsafe_allow_html=True)
+            fig, axes = plt.subplots(1,3,figsize=(18,6),constrained_layout=True)
+            im0=axes[0].imshow(rnflt,cmap='turbo');axes[0].axis('off');axes[0].set_title("Uploaded RNFLT")
+            plt.colorbar(im0,ax=axes[0],shrink=0.85)
+            im1=axes[1].imshow(diff,cmap='bwr',vmin=-30,vmax=30);axes[1].axis('off');axes[1].set_title("Difference (vs Healthy)")
+            plt.colorbar(im1,ax=axes[1],shrink=0.85)
+            im2=axes[2].imshow(risk,cmap='hot');axes[2].axis('off');axes[2].set_title("Risk Map")
+            plt.colorbar(im2,ax=axes[2],shrink=0.85)
+            fig.patch.set_facecolor("#050612")
+            st.pyplot(fig)
+            figs.append(fig)
+
+    # B-Scan Processing
+    if bscan_file and b_model is not None:
+        image_pil = Image.open(bscan_file).convert("L")
+        batch, proc = preprocess_bscan(image_pil)
+        pred_raw = b_model.predict(batch, verbose=0)[0][0]
+        label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
+        conf = pred_raw*100 if label_b=="Glaucoma-like" else (1-pred_raw)*100
+        severity_overall = max(severity_overall, conf)
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+        m1, m2 = st.columns(2)
+        m1.markdown(f"<div class='metric-label'>CNN Prediction</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
+        m2.markdown(f"<div class='metric-label'>Confidence</div><div class='large-metric'>{conf:.2f}%</div>", unsafe_allow_html=True)
+        st.markdown(render_severity(conf), unsafe_allow_html=True)
+
+        heat = gradcam(batch, b_model)
+        if heat is not None:
+            heat_r = cv2.resize(heat, (224,224))
+            hm = (heat_r * 255).astype(np.uint8)
+            hm_color = cv2.applyColorMap(hm, cv2.COLORMAP_JET)
+            overlay = (np.stack([proc]*3, axis=-1)*255).astype(np.uint8)
+            overlay = cv2.addWeighted(overlay, 0.6, hm_color, 0.4, 0)
+            st.image([image_pil, overlay], caption=["Original B-Scan", "Grad-CAM Overlay"], use_column_width=True)
+
+    # Combined Severity Summary
     st.markdown("<hr>", unsafe_allow_html=True)
-    st.markdown("<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
-    st.markdown(render_severity_html(severity_overall), unsafe_allow_html=True)
-    if figs_for_report:
-        png_bytes = fig_to_png_bytes(figs_for_report[0])
-        pdf_bytes = create_pdf_bytes(figs_for_report)
-        st.markdown('<div class="download-btns">', unsafe_allow_html=True)
+    st.markdown(f"<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
+    st.markdown(render_severity(severity_overall), unsafe_allow_html=True)
+
+    # Download buttons
+    if figs:
+        png_bytes = fig_to_png(figs[0])
+        pdf_bytes = create_pdf(figs)
+        st.markdown("<div class='download-btns'>", unsafe_allow_html=True)
         st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
         st.download_button("📄 Download Full Report (PDF)", data=pdf_bytes, file_name="oculaire_report.pdf", mime="application/pdf")
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+# -----------------------
+# CHATBOT INTERFACE
+# -----------------------
+# Floating chat button
+chat_col1, chat_col2, chat_col3 = st.columns([6, 1, 1])
+with chat_col3:
+    if st.button("💬", key="chat_toggle", help="Ask about glaucoma"):
+        st.session_state.chat_open = not st.session_state.chat_open
+
+# Chat interface in sidebar when open
+if st.session_state.chat_open:
+    with st.sidebar:
+        st.markdown("""
+        <div style='text-align:center; margin-bottom:20px;'>
+            <h2 style='background: linear-gradient(90deg, var(--neonA), var(--neonB)); 
+                       -webkit-background-clip:text; -webkit-text-fill-color:transparent;'>
+                🤖 Glaucoma Assistant
+            </h2>
+            <p style='color:var(--muted); font-size:13px;'>Ask me anything about glaucoma!</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Display chat history
+        chat_container = st.container()
+        with chat_container:
+            for msg in st.session_state.chat_history:
+                if msg["role"] == "user":
+                    st.markdown(f"""
+                    <div style='background: rgba(0,245,255,0.1); padding:10px; border-radius:10px; margin:5px 0;'>
+                        <strong>You:</strong> {msg['content']}
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div style='background: rgba(255,64,196,0.1); padding:10px; border-radius:10px; margin:5px 0;'>
+                        <strong>Assistant:</strong> {msg['content']}
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        # Input area
+        user_question = st.text_input("Your question:", key="user_input", placeholder="e.g., What is glaucoma?")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            if st.button("Send", use_container_width=True):
+                if user_question:
+                    with st.spinner("Thinking..."):
+                        response = ask_glaucoma_assistant(user_question, st.session_state.chat_history)
+                        st.session_state.chat_history.append({"role": "user", "content": user_question})
+                        st.session_state.chat_history.append({"role": "assistant", "content": response})
+                        st.rerun()
+        
+        with col2:
+            if st.button("Clear", use_container_width=True):
+                st.session_state.chat_history = []
+                st.rerun()
 
 st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research/demo use only</div>", unsafe_allow_html=True)
-
-# -----------------------
-# Floating Chatbot UI
-# -----------------------
-# Render a bubble (HTML) that triggers the hidden Streamlit button.
-# We will render a real Streamlit button (with on_click) but hide it via JS so that no blank block is shown.
-st.markdown(
-    """
-    <div class="chat-bubble-wrapper">
-      <div style="display:flex;gap:8px;align-items:flex-end">
-        <div class="chat-bubble" id="bubble_html">🤖</div>
-      </div>
-    </div>
-    <script>
-      // Attach click to bubble to "click" the hidden streamlit button once it exists.
-      (function(){
-        const bubble = document.getElementById('bubble_html');
-        bubble && bubble.addEventListener('click', function(){
-          // find a streamlit button with the text 'Toggle Chat (hidden)' and click it
-          const buttons = Array.from(document.querySelectorAll('button'));
-          for(const b of buttons){
-            if(b.innerText && b.innerText.trim().toLowerCase().includes('toggle chat (hidden)')){
-              b.click();
-              return;
-            }
-          }
-          // fallback: try clicking any button with data-testid
-          const anyButton = document.querySelector('button');
-          anyButton && anyButton.click();
-        });
-      })();
-    </script>
-    """,
-    unsafe_allow_html=True,
-)
-
-# The real Streamlit toggle button (hidden client-side by the JS below).
-# on_click will call toggle_chat() server-side to flip session_state.chat_visible.
-st.button("Toggle Chat (hidden)", key="toggle_chat_btn", on_click=toggle_chat)
-
-# After the above, hide the button container using a small JS snippet to remove leftover UI block.
-# We use components.html to ensure script runs in the client.
-components.html(
-    """
-    <script>
-    (function(){
-      // hide any button whose text contains 'Toggle Chat (hidden)' plus its parent container
-      const buttons = Array.from(document.querySelectorAll('button'));
-      for(const b of buttons){
-        if(b.innerText && b.innerText.trim().toLowerCase().includes('toggle chat (hidden)')){
-          const container = b.closest('.stButton') || b.parentElement;
-          if(container) container.style.display = 'none';
-        }
-      }
-    })();
-    </script>
-    """,
-    height=0,
-)
-
-# If chat visible, render the chat window (pure Streamlit components for messages + input)
-if st.session_state.chat_visible:
-    # We'll render the floating chat window HTML structure then render messages and a Streamlit input for reply.
-    st.markdown(
-        """
-        <div class="chat-bubble-wrapper" style="pointer-events:auto;">
-          <div class="chat-window" id="st_chat_window">
-            <div class="chat-header">Glaucoma Assistant
-              <button id="st_close_chat" style="background:none;border:none;color:var(--neonA);font-weight:bold;cursor:pointer">✖</button>
-            </div>
-            <div class="chat-history" id="chat_history_client">
-            </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # Render messages using Streamlit (so state is server-side)
-    # We'll show the last 40 messages
-    for msg in st.session_state.chat_messages[-40:]:
-        if msg["role"] == "user":
-            st.markdown(f"<div class='user-message'>{st.markdown.__wrapped__ and ''}{msg['content']}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div class='ai-message'>{msg['content']}</div>", unsafe_allow_html=True)
-
-    # Input for chat (callback submits)
-    st.text_input("Ask the assistant (glaucoma-only)", key="chat_input", on_change=submit_chat, placeholder="Ask about glaucoma, RNFLT or B-scan")
-
-    # Close the chat window HTML tags
-    st.markdown("</div></div>", unsafe_allow_html=True)
-
-    # Add a tiny client script to wire the close button to the hidden Streamlit toggle button (so users can close)
-    components.html(
-        """
-        <script>
-        (function(){
-          // find the close button inside the chat header and make it click the hidden Streamlit button
-          const btn = document.getElementById('st_close_chat');
-          if(btn){
-            btn.addEventListener('click', function(){
-              const buttons = Array.from(document.querySelectorAll('button'));
-              for(const b of buttons){
-                if(b.innerText && b.innerText.trim().toLowerCase().includes('toggle chat (hidden)')){
-                  b.click(); return;
-                }
-              }
-              // fallback
-              const anyButton = document.querySelector('button');
-              anyButton && anyButton.click();
-            });
-          }
-        })();
-        </script>
-        """,
-        height=0,
-    )
-
-# End of file
+st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
