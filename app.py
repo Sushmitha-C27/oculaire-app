@@ -29,12 +29,21 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 # -----------------------
 # Initialize Session State for Chat
 # -----------------------
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-if "chat_open" not in st.session_state:
-    st.session_state["chat_open"] = False
-if "chat_input" not in st.session_state:
-    st.session_state["chat_input"] = ""
+_defaults = {
+    "chat_history": [],        # list of {"role": "...", "content": "..."}
+    "chat_open": False,        # whether sidebar chat is open
+    "chat_input": "",          # current chat input text
+    "genai_available": False,  # optional flag if SDK configured
+    "genai_model": None,       # optional SDK model handle
+}
+
+for k, v in _defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+# helper to read safely (optional convenience)
+def ss(key, default=None):
+    return st.session_state.get(key, default)
 
 # Get API key from Streamlit secrets or environment variable
 # Priority: Streamlit secrets > Environment variable > User input
