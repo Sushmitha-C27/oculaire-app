@@ -182,54 +182,24 @@ st.markdown("""
   50% { box-shadow: 0 0 40px rgba(0,245,255,0.9), 0 0 60px rgba(255,64,196,0.8); }
 }
 
-/* Chat Window */
-.chat-window {
-  position: fixed;
-  bottom: 120px;
-  right: 30px;
-  width: 400px;
-  max-height: 600px;
-  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98));
-  border: 2px solid rgba(0,245,255,0.3);
-  border-radius: 20px;
-  box-shadow: 0 0 40px rgba(0,245,255,0.3), 0 0 60px rgba(255,64,196,0.2);
-  z-index: 9998;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  animation: slideUp 0.3s ease-out;
+/* Fixed button container */
+.stButton button[kind="primary"] {
+  position: fixed !important;
+  bottom: 30px !important;
+  right: 30px !important;
+  z-index: 9999 !important;
+  border-radius: 50px !important;
+  padding: 12px 24px !important;
+  background: linear-gradient(135deg, #00f5ff, #ff40c4) !important;
+  border: none !important;
+  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5) !important;
+  animation: float 3s ease-in-out infinite !important;
+  font-weight: 800 !important;
+  font-size: 16px !important;
 }
-@keyframes slideUp {
-  from { transform: translateY(20px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-.chat-window-header {
-  background: linear-gradient(90deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2));
-  padding: 16px;
-  border-bottom: 1px solid rgba(0,245,255,0.3);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.chat-window-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  max-height: 400px;
-}
-.chat-window-footer {
-  padding: 16px;
-  border-top: 1px solid rgba(0,245,255,0.2);
-  background: rgba(0,0,0,0.3);
-}
-.close-chat {
-  cursor: pointer;
-  font-size: 24px;
-  color: var(--neonB);
-  transition: transform 0.2s;
-}
-.close-chat:hover {
-  transform: scale(1.2);
+.stButton button[kind="primary"]:hover {
+  box-shadow: 0 0 40px rgba(0,245,255,0.8), 0 0 50px rgba(255,64,196,0.7) !important;
+  transform: scale(1.05) !important;
 }
 
 footer { visibility:hidden; }
@@ -468,68 +438,11 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING CHAT BUTTON (Bottom-right)
+# FLOATING CHAT BUTTON (Bottom-right corner)
 # -----------------------
-# This creates a visual floating button effect
-st.markdown(f"""
-<style>
-.floating-chat-btn {{
-    position: fixed;
-    bottom: 30px;
-    right: 30px;
-    z-index: 999;
-}}
-</style>
-<div class="floating-chat-btn">
-</div>
-""", unsafe_allow_html=True)
+# The button needs to be at the end of the page to appear at bottom
 
-# Place toggle button in bottom right using columns
-st.markdown("<br>" * 20, unsafe_allow_html=True)  # Add space at bottom
-
-col_spacer1, col_spacer2, col_btn = st.columns([8, 1, 1])
-with col_btn:
-    if st.button("🤖 Chat" if not st.session_state.chat_open else "✖️ Close", 
-                 key="toggle_chat", 
-                 use_container_width=True,
-                 type="primary"):
-        st.session_state.chat_open = not st.session_state.chat_open
-        st.rerun()
-
-# Chat window in sidebar when open
-if st.session_state.chat_open:
-    with st.sidebar:
-        st.markdown("---")
-        st.markdown("<div class='chat-header'>🤖 Glaucoma Assistant</div>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px;'>Ask about glaucoma, OCT, RNFLT!</p>", unsafe_allow_html=True)
-        
-        # Display chat history
-        for msg in st.session_state.chat_history:
-            if msg["role"] == "user":
-                st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-        
-        # Input area
-        user_question = st.text_input("Your question:", key="chat_input", placeholder="What is glaucoma?")
-        
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            if st.button("📤 Send", use_container_width=True):
-                if user_question and API_KEY:
-                    with st.spinner("🔍 Thinking..."):
-                        response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
-                        st.session_state.chat_history.append({"role": "user", "content": user_question})
-                        st.session_state.chat_history.append({"role": "assistant", "content": response})
-                        st.rerun()
-                elif not API_KEY:
-                    st.error("❌ No API key")
-        with col2:
-            if st.button("🗑️", use_container_width=True):
-                st.session_state.chat_history = []
-                st.rerun()
-
-st.markdown("---")
+# We'll place it after all content
 
 # -----------------------
 # LAYOUT
@@ -625,4 +538,4 @@ if rnflt_file or bscan_file:
         st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)xs
