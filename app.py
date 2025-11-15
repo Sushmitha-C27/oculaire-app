@@ -31,6 +31,8 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 # -----------------------
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
+if 'chat_open' not in st.session_state:
+    st.session_state.chat_open = False
 
 # Get API key from Streamlit secrets or environment variable
 # Priority: Streamlit secrets > Environment variable > User input
@@ -148,10 +150,92 @@ st.markdown("""
   text-shadow: 0 0 20px rgba(0,245,255,0.3);
 }
 
+/* Floating Chat Bubble */
+.chat-bubble {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--neonA), var(--neonB));
+  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  z-index: 9999;
+  animation: float 3s ease-in-out infinite, glow 2s ease-in-out infinite;
+  transition: transform 0.3s ease;
+}
+.chat-bubble:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 40px rgba(0,245,255,0.8), 0 0 50px rgba(255,64,196,0.7);
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5); }
+  50% { box-shadow: 0 0 40px rgba(0,245,255,0.9), 0 0 60px rgba(255,64,196,0.8); }
+}
+
+/* Chat Window */
+.chat-window {
+  position: fixed;
+  bottom: 120px;
+  right: 30px;
+  width: 400px;
+  max-height: 600px;
+  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98));
+  border: 2px solid rgba(0,245,255,0.3);
+  border-radius: 20px;
+  box-shadow: 0 0 40px rgba(0,245,255,0.3), 0 0 60px rgba(255,64,196,0.2);
+  z-index: 9998;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slideUp 0.3s ease-out;
+}
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.chat-window-header {
+  background: linear-gradient(90deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2));
+  padding: 16px;
+  border-bottom: 1px solid rgba(0,245,255,0.3);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.chat-window-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  max-height: 400px;
+}
+.chat-window-footer {
+  padding: 16px;
+  border-top: 1px solid rgba(0,245,255,0.2);
+  background: rgba(0,0,0,0.3);
+}
+.close-chat {
+  cursor: pointer;
+  font-size: 24px;
+  color: var(--neonB);
+  transition: transform 0.2s;
+}
+.close-chat:hover {
+  transform: scale(1.2);
+}
+
 footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
-MODEL_NAME = "models/gemini-2.5-pro"
+
 # -----------------------
 # Chatbot Function
 # -----------------------
@@ -178,8 +262,7 @@ Important: Always remind users to consult healthcare professionals for medical d
         if USE_SDK:
             # Use official Google AI SDK
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(MODEL_NAME)
-
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
             # Build conversation
             chat_history = []
@@ -200,7 +283,7 @@ Important: Always remind users to consult healthcare professionals for medical d
             
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
             
-            url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
             
             response = requests.post(
                 url,
@@ -385,39 +468,66 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # -----------------------
-# CHATBOT SECTION (at top)
+# FLOATING CHAT BUTTON (Bottom-right)
 # -----------------------
-with st.expander("💬 Ask Glaucoma Assistant", expanded=False):
-    st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:var(--muted); font-size:14px; margin-bottom:20px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
-    
-    # Display chat history
-    for msg in st.session_state.chat_history:
-        if msg["role"] == "user":
-            st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div class='assistant-msg'><strong>🤖 Assistant:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-    
-    # Input area
-    col1, col2 = st.columns([5, 1])
-    with col1:
-        user_question = st.text_input("Your question:", key="user_input", placeholder="e.g., What is glaucoma? How does OCT detect it?", label_visibility="collapsed")
-    with col2:
-        send_button = st.button("📤 Send", use_container_width=True)
-    
-    if send_button and user_question:
-        if not API_KEY:
-            st.error("❌ Cannot send message: API key not configured. See sidebar for setup instructions.")
-        else:
-            with st.spinner("🔍 Searching for answers..."):
-                response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
-                st.session_state.chat_history.append({"role": "user", "content": user_question})
-                st.session_state.chat_history.append({"role": "assistant", "content": response})
-                st.rerun()
-    
-    if st.button("🗑️ Clear Chat History", use_container_width=False):
-        st.session_state.chat_history = []
+# This creates a visual floating button effect
+st.markdown(f"""
+<style>
+.floating-chat-btn {{
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    z-index: 999;
+}}
+</style>
+<div class="floating-chat-btn">
+</div>
+""", unsafe_allow_html=True)
+
+# Place toggle button in bottom right using columns
+st.markdown("<br>" * 20, unsafe_allow_html=True)  # Add space at bottom
+
+col_spacer1, col_spacer2, col_btn = st.columns([8, 1, 1])
+with col_btn:
+    if st.button("🤖 Chat" if not st.session_state.chat_open else "✖️ Close", 
+                 key="toggle_chat", 
+                 use_container_width=True,
+                 type="primary"):
+        st.session_state.chat_open = not st.session_state.chat_open
         st.rerun()
+
+# Chat window in sidebar when open
+if st.session_state.chat_open:
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("<div class='chat-header'>🤖 Glaucoma Assistant</div>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px;'>Ask about glaucoma, OCT, RNFLT!</p>", unsafe_allow_html=True)
+        
+        # Display chat history
+        for msg in st.session_state.chat_history:
+            if msg["role"] == "user":
+                st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+        
+        # Input area
+        user_question = st.text_input("Your question:", key="chat_input", placeholder="What is glaucoma?")
+        
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            if st.button("📤 Send", use_container_width=True):
+                if user_question and API_KEY:
+                    with st.spinner("🔍 Thinking..."):
+                        response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
+                        st.session_state.chat_history.append({"role": "user", "content": user_question})
+                        st.session_state.chat_history.append({"role": "assistant", "content": response})
+                        st.rerun()
+                elif not API_KEY:
+                    st.error("❌ No API key")
+        with col2:
+            if st.button("🗑️", use_container_width=True):
+                st.session_state.chat_history = []
+                st.rerun()
 
 st.markdown("---")
 
