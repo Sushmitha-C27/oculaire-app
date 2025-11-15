@@ -31,8 +31,6 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 # -----------------------
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
-if 'chat_open' not in st.session_state:
-    st.session_state.chat_open = False
 
 # Get API key from Streamlit secrets or environment variable
 # Priority: Streamlit secrets > Environment variable > User input
@@ -150,6 +148,95 @@ st.markdown("""
   text-shadow: 0 0 20px rgba(0,245,255,0.3);
 }
 
+/* Floating Chat Bubble */
+.chat-bubble {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--neonA), var(--neonB));
+  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  z-index: 9999;
+  animation: float 3s ease-in-out infinite, glow 2s ease-in-out infinite;
+  transition: transform 0.3s ease;
+}
+.chat-bubble:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 40px rgba(0,245,255,0.8), 0 0 50px rgba(255,64,196,0.7);
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5); }
+  50% { box-shadow: 0 0 40px rgba(0,245,255,0.9), 0 0 60px rgba(255,64,196,0.8); }
+}
+
+/* Fixed button container */
+.floating-expander {
+  position: fixed !important;
+  bottom: 20px !important;
+  right: 20px !important;
+  width: 400px !important;
+  z-index: 9999 !important;
+  box-shadow: 0 0 40px rgba(0,245,255,0.4), 0 0 60px rgba(255,64,196,0.3) !important;
+  border-radius: 16px !important;
+  animation: float 3s ease-in-out infinite !important;
+}
+
+/* Style the expander */
+.floating-expander details {
+  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
+  border: 2px solid rgba(0,245,255,0.3) !important;
+  border-radius: 16px !important;
+}
+
+.floating-expander details summary {
+  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
+  padding: 16px !important;
+  border-radius: 14px !important;
+  cursor: pointer !important;
+  font-weight: 800 !important;
+  font-size: 16px !important;
+  color: #e6faff !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.floating-expander details summary:hover {
+  background: linear-gradient(135deg, rgba(0,245,255,0.3), rgba(255,64,196,0.3)) !important;
+  box-shadow: 0 0 25px rgba(0,245,255,0.5) !important;
+}
+
+.floating-expander details[open] {
+  box-shadow: 0 0 50px rgba(0,245,255,0.6), 0 0 70px rgba(255,64,196,0.4) !important;
+}
+
+/* Floating Chat Expander at Bottom */
+.floating-expander {
+  position: fixed !important;
+  bottom: 20px !important;
+  right: 20px !important;
+  width: 450px !important;
+  max-width: 90vw !important;
+  z-index: 9999 !important;
+  animation: float 3s ease-in-out infinite !important;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+
 footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
@@ -200,8 +287,8 @@ Important: Always remind users to consult healthcare professionals for medical d
                 conversation_context += f"{role}: {msg['content']}\n\n"
             
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
-            
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
+
+            url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
             
             response = requests.post(
                 url,
@@ -386,41 +473,11 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # -----------------------
-# CHATBOT SECTION (at top)
+# FLOATING CHAT BUTTON (Bottom-right corner)
 # -----------------------
-with st.expander("💬 Ask Glaucoma Assistant", expanded=False):
-    st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:var(--muted); font-size:14px; margin-bottom:20px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
-    
-    # Display chat history
-    for msg in st.session_state.chat_history:
-        if msg["role"] == "user":
-            st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div class='assistant-msg'><strong>🤖 Assistant:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-    
-    # Input area
-    col1, col2 = st.columns([5, 1])
-    with col1:
-        user_question = st.text_input("Your question:", key="user_input", placeholder="e.g., What is glaucoma? How does OCT detect it?", label_visibility="collapsed")
-    with col2:
-        send_button = st.button("📤 Send", use_container_width=True)
-    
-    if send_button and user_question:
-        if not API_KEY:
-            st.error("❌ Cannot send message: API key not configured. See sidebar for setup instructions.")
-        else:
-            with st.spinner("🔍 Searching for answers..."):
-                response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
-                st.session_state.chat_history.append({"role": "user", "content": user_question})
-                st.session_state.chat_history.append({"role": "assistant", "content": response})
-                st.rerun()
-    
-    if st.button("🗑️ Clear Chat History", use_container_width=False):
-        st.session_state.chat_history = []
-        st.rerun()
+# The button needs to be at the end of the page to appear at bottom
 
-st.markdown("---")
+# We'll place it after all content
 
 # -----------------------
 # LAYOUT
@@ -517,3 +574,43 @@ if rnflt_file or bscan_file:
 
 st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
+
+# -----------------------
+# FLOATING CHAT EXPANDER (Bottom-right corner)
+# -----------------------
+st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
+with st.expander("💬 Ask Glaucoma Assistant", expanded=False):
+    st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:15px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
+    
+    # Display chat history
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+    
+    # Input area
+    user_question = st.text_input("Your question:", key="chat_input", placeholder="e.g., What is glaucoma? How does OCT detect it?", label_visibility="collapsed")
+    
+    col1, col2 = st.columns([4, 1])
+    with col1:
+        send_btn = st.button("📤 Send", use_container_width=True)
+    with col2:
+        clear_btn = st.button("🗑️", use_container_width=True)
+    
+    if send_btn and user_question:
+        if not API_KEY:
+            st.error("❌ API key not configured. See sidebar.")
+        else:
+            with st.spinner("🔍 Searching for answers..."):
+                response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
+                st.session_state.chat_history.append({"role": "user", "content": user_question})
+                st.session_state.chat_history.append({"role": "assistant", "content": response})
+                st.rerun()
+    
+    if clear_btn:
+        st.session_state.chat_history = []
+        st.rerun()
+
+st.markdown('</div>', unsafe_allow_html=True)
