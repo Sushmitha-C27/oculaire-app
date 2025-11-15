@@ -31,8 +31,6 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 # -----------------------
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
-if 'chat_open' not in st.session_state:
-    st.session_state.chat_open = False
 
 # Get API key from Streamlit secrets or environment variable
 # Priority: Streamlit secrets > Environment variable > User input
@@ -183,23 +181,44 @@ st.markdown("""
 }
 
 /* Fixed button container */
-.stButton button[kind="primary"] {
+.floating-expander {
   position: fixed !important;
-  bottom: 30px !important;
-  right: 30px !important;
+  bottom: 20px !important;
+  right: 20px !important;
+  width: 400px !important;
   z-index: 9999 !important;
-  border-radius: 50px !important;
-  padding: 12px 24px !important;
-  background: linear-gradient(135deg, #00f5ff, #ff40c4) !important;
-  border: none !important;
-  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5) !important;
+  box-shadow: 0 0 40px rgba(0,245,255,0.4), 0 0 60px rgba(255,64,196,0.3) !important;
+  border-radius: 16px !important;
   animation: float 3s ease-in-out infinite !important;
+}
+
+/* Style the expander */
+.floating-expander details {
+  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
+  border: 2px solid rgba(0,245,255,0.3) !important;
+  border-radius: 16px !important;
+}
+
+.floating-expander details summary {
+  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
+  padding: 16px !important;
+  border-radius: 14px !important;
+  cursor: pointer !important;
   font-weight: 800 !important;
   font-size: 16px !important;
+  color: #e6faff !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
 }
-.stButton button[kind="primary"]:hover {
-  box-shadow: 0 0 40px rgba(0,245,255,0.8), 0 0 50px rgba(255,64,196,0.7) !important;
-  transform: scale(1.05) !important;
+
+.floating-expander details summary:hover {
+  background: linear-gradient(135deg, rgba(0,245,255,0.3), rgba(255,64,196,0.3)) !important;
+  box-shadow: 0 0 25px rgba(0,245,255,0.5) !important;
+}
+
+.floating-expander details[open] {
+  box-shadow: 0 0 50px rgba(0,245,255,0.6), 0 0 70px rgba(255,64,196,0.4) !important;
 }
 
 footer { visibility:hidden; }
@@ -538,4 +557,4 @@ if rnflt_file or bscan_file:
         st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)xs
+st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
