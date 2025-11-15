@@ -1,4 +1,4 @@
-# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot
+# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (fixed session_state + working bubble)
 import streamlit as st
 import numpy as np
 import joblib
@@ -27,10 +27,15 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    page_icon="👁️")
 
 # -----------------------
-# Initialize Session State for Chat
+# Initialize Session State for Chat (prevent AttributeError)
 # -----------------------
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
+# <-- FIX: create chat_open and chat_input defaults to avoid AttributeError
+if 'chat_open' not in st.session_state:
+    st.session_state.chat_open = False
+if 'chat_input' not in st.session_state:
+    st.session_state.chat_input = ""
 
 # Get API key from Streamlit secrets or environment variable
 # Priority: Streamlit secrets > Environment variable > User input
@@ -180,62 +185,22 @@ st.markdown("""
   50% { box-shadow: 0 0 40px rgba(0,245,255,0.9), 0 0 60px rgba(255,64,196,0.8); }
 }
 
-/* Fixed button container */
-.floating-expander {
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 20px !important;
-  width: 400px !important;
-  z-index: 9999 !important;
-  box-shadow: 0 0 40px rgba(0,245,255,0.4), 0 0 60px rgba(255,64,196,0.3) !important;
-  border-radius: 16px !important;
-  animation: float 3s ease-in-out infinite !important;
+/* Floating Chat Pill (text) */
+.floating-chat-pill {
+  position: fixed;
+  bottom: 36px;
+  right: 110px;
+  z-index: 9999;
+  background: linear-gradient(135deg, rgba(0,245,255,0.08), rgba(255,64,196,0.06));
+  padding: 12px 18px;
+  border-radius: 30px;
+  color: #e6faff;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+  transition: transform 0.12s ease;
 }
-
-/* Style the expander */
-.floating-expander details {
-  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
-  border: 2px solid rgba(0,245,255,0.3) !important;
-  border-radius: 16px !important;
-}
-
-.floating-expander details summary {
-  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
-  padding: 16px !important;
-  border-radius: 14px !important;
-  cursor: pointer !important;
-  font-weight: 800 !important;
-  font-size: 16px !important;
-  color: #e6faff !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-}
-
-.floating-expander details summary:hover {
-  background: linear-gradient(135deg, rgba(0,245,255,0.3), rgba(255,64,196,0.3)) !important;
-  box-shadow: 0 0 25px rgba(0,245,255,0.5) !important;
-}
-
-.floating-expander details[open] {
-  box-shadow: 0 0 50px rgba(0,245,255,0.6), 0 0 70px rgba(255,64,196,0.4) !important;
-}
-
-/* Floating Chat Expander at Bottom */
-.floating-expander {
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 20px !important;
-  width: 450px !important;
-  max-width: 90vw !important;
-  z-index: 9999 !important;
-  animation: float 3s ease-in-out infinite !important;
-}
-
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-8px); }
-}
+.floating-chat-pill:hover { transform: translateY(-4px); }
 
 footer { visibility:hidden; }
 </style>
@@ -473,14 +438,74 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING CHAT BUTTON (Bottom-right corner)
+# FLOATING CHAT WIDGET (Bottom-right corner)
 # -----------------------
-# The button needs to be at the end of the page to appear at bottom
+# Visible bubble + pill
+st.markdown('<div class="chat-bubble" id="chatBubble">🤖</div><div class="floating-chat-pill" id="chatPill">Ask Assistant</div>', unsafe_allow_html=True)
 
-# We'll place it after all content
+# <-- FIX: create a hidden unique toggle button (JS will click this). This avoids fragile parent-document searches.
+_TOGGLE_UNIQUE_LABEL = "__OCULAIRE_TOGGLE_CHAT__"
+st.markdown('<div style="position:absolute;left:-9999px;top:-9999px;opacity:0;">', unsafe_allow_html=True)
+toggle_clicked = st.button(_TOGGLE_UNIQUE_LABEL, key="__oculaire_toggle_button__")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# When hidden button clicked toggles chat_open
+if toggle_clicked:
+    st.session_state.chat_open = not st.session_state.chat_open
+    # rerun to update UI immediately
+    st.experimental_rerun()
+
+# JS to click the hidden button when user clicks the bubble/pill
+st.markdown(f"""
+<script>
+(function(){{
+  function clickHidden() {{
+    const targetLabel = "{_TOGGLE_UNIQUE_LABEL}";
+    // Search current document buttons first
+    const buttons = Array.from(document.querySelectorAll('button'));
+    for (let b of buttons) {{
+      if ((b.innerText || "").trim() === targetLabel) {{
+        b.click();
+        return true;
+      }}
+    }}
+    // try parent document (iframe scenarios)
+    try {{
+      if (window.parent && window.parent.document) {{
+        const pbtns = Array.from(window.parent.document.querySelectorAll('button'));
+        for (let b of pbtns) {{
+          if ((b.innerText || "").trim() === targetLabel) {{
+            b.click();
+            return true;
+          }}
+        }}
+      }}
+    }} catch(e) {{
+      // ignore cross-origin errors
+    }}
+    console.warn("Toggle button not found:", targetLabel);
+    return false;
+  }}
+
+  const bubble = document.getElementById('chatBubble');
+  const pill = document.getElementById('chatPill');
+  [bubble, pill].forEach(el => {{
+    if (!el) return;
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', function(e) {{
+      e.preventDefault();
+      // tiny visual feedback
+      el.style.transform = 'scale(0.98)';
+      setTimeout(()=> el.style.transform = '', 120);
+      clickHidden();
+    }});
+  }});
+}})();
+</script>
+""", unsafe_allow_html=True)
 
 # -----------------------
-# LAYOUT
+# LAYOUT (uploads etc.)
 # -----------------------
 colA, colB = st.columns(2)
 
@@ -499,7 +524,7 @@ with colB:
 threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
 # -----------------------
-# ANALYSIS
+# ANALYSIS (same as before)
 # -----------------------
 if rnflt_file or bscan_file:
     figs = []
@@ -576,119 +601,8 @@ st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING CHAT WIDGET (Bottom-right corner)
-# -----------------------
-# Create a floating button that opens chat in sidebar
-st.markdown("""
-<div class="floating-chat-bubble" id="chatBubble">
-    <span class="robot-icon">🤖</span>
-    <span class="chat-text">Ask Assistant</span>
-</div>
-
-<style>
-.floating-chat-bubble {
-    position: fixed;
-    bottom: 30px;
-    right: 30px;
-    width: auto;
-    min-width: 180px;
-    padding: 18px 28px;
-    background: linear-gradient(135deg, rgba(0,245,255,0.25), rgba(255,64,196,0.25));
-    border: 2px solid transparent;
-    border-radius: 50px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    z-index: 9999;
-    font-weight: 800;
-    font-size: 17px;
-    color: #e6faff;
-    backdrop-filter: blur(20px);
-    box-shadow: 
-        0 0 40px rgba(0,245,255,0.4),
-        0 0 60px rgba(255,64,196,0.3),
-        0 10px 40px rgba(0,0,0,0.5);
-    animation: gentleFloat 4s ease-in-out infinite, borderGlow 3s ease-in-out infinite;
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.floating-chat-bubble::before {
-    content: '';
-    position: absolute;
-    top: -2px;
-    left: -2px;
-    right: -2px;
-    bottom: -2px;
-    background: linear-gradient(135deg, #00f5ff, #ff40c4, #00f5ff);
-    border-radius: 50px;
-    z-index: -1;
-    animation: borderRotate 3s linear infinite;
-    background-size: 200% 200%;
-}
-
-.robot-icon {
-    font-size: 38px;
-    animation: robotPulse 2s ease-in-out infinite;
-    filter: drop-shadow(0 0 10px rgba(0,245,255,0.8));
-}
-
-.chat-text {
-    font-weight: 900;
-    letter-spacing: 0.5px;
-    text-shadow: 0 0 10px rgba(0,245,255,0.5);
-}
-
-.floating-chat-bubble:hover {
-    transform: translateY(-5px) scale(1.05);
-    background: linear-gradient(135deg, rgba(0,245,255,0.35), rgba(255,64,196,0.35));
-    box-shadow: 
-        0 0 50px rgba(0,245,255,0.6),
-        0 0 80px rgba(255,64,196,0.5),
-        0 15px 50px rgba(0,0,0,0.6);
-}
-
-@keyframes gentleFloat {
-    0%, 100% { transform: translateY(0px); }
-    50% { transform: translateY(-12px); }
-}
-
-@keyframes robotPulse {
-    0%, 100% { 
-        transform: scale(1);
-        filter: drop-shadow(0 0 10px rgba(0,245,255,0.8));
-    }
-    50% { 
-        transform: scale(1.15);
-        filter: drop-shadow(0 0 20px rgba(255,64,196,1));
-    }
-}
-
-@keyframes borderRotate {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
-}
-
-@keyframes borderGlow {
-    0%, 100% { 
-        box-shadow: 
-            0 0 40px rgba(0,245,255,0.4),
-            0 0 60px rgba(255,64,196,0.3),
-            0 10px 40px rgba(0,0,0,0.5);
-    }
-    50% { 
-        box-shadow: 
-            0 0 60px rgba(0,245,255,0.7),
-            0 0 90px rgba(255,64,196,0.6),
-            0 10px 40px rgba(0,0,0,0.5);
-    }
-}
-</style>
-""", unsafe_allow_html=True)
-
 # When chat is open, show in sidebar
+# -----------------------
 if st.session_state.chat_open:
     with st.sidebar:
         st.markdown("---")
@@ -702,7 +616,7 @@ if st.session_state.chat_open:
             else:
                 st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
         
-        # Input area
+        # Input area bound to session_state.chat_input
         user_question = st.text_input("Your question:", key="chat_input", placeholder="What is glaucoma?")
         
         col1, col2, col3 = st.columns([3, 1, 1])
@@ -713,39 +627,16 @@ if st.session_state.chat_open:
                         response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
                         st.session_state.chat_history.append({"role": "user", "content": user_question})
                         st.session_state.chat_history.append({"role": "assistant", "content": response})
-                        st.rerun()
+                        # clear input after send
+                        st.session_state.chat_input = ""
+                        st.experimental_rerun()
                 elif not API_KEY:
                     st.error("❌ No API key")
         with col2:
             if st.button("🗑️", use_container_width=True):
                 st.session_state.chat_history = []
-                st.rerun()
+                st.experimental_rerun()
         with col3:
             if st.button("✖️", use_container_width=True):
                 st.session_state.chat_open = False
-                st.rerun()
-
-# Toggle button (invisible, just for state management)
-if st.button("Toggle Chat", key="toggle_chat_hidden", type="secondary"):
-    st.session_state.chat_open = not st.session_state.chat_open
-    st.rerun()
-
-# JavaScript to make the bubble clickable
-st.markdown("""
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const bubble = document.getElementById('chatBubble');
-    if (bubble) {
-        bubble.addEventListener('click', function() {
-            // Find and click the Streamlit button
-            const buttons = window.parent.document.querySelectorAll('button');
-            buttons.forEach(btn => {
-                if (btn.textContent.includes('Toggle Chat')) {
-                    btn.click();
-                }
-            });
-        });
-    }
-});
-</script>
-""", unsafe_allow_html=True)
+                st.experimental_rerun()
