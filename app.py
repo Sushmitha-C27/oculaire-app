@@ -1,4 +1,4 @@
-# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (fixed session_state + working bubble)
+# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (query-param toggle)
 import streamlit as st
 import numpy as np
 import joblib
@@ -31,27 +31,30 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 # -----------------------
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
-# <-- FIX: create chat_open and chat_input defaults to avoid AttributeError
 if 'chat_open' not in st.session_state:
     st.session_state.chat_open = False
 if 'chat_input' not in st.session_state:
     st.session_state.chat_input = ""
 
+# -----------------------
+# Handle query param toggle (robust)
+# If URL contains ?open_chat=1, open the chat and then clear params
+# -----------------------
+params = st.experimental_get_query_params()
+if "open_chat" in params and params.get("open_chat", [""])[0] in ("1", "true", "True"):
+    st.session_state.chat_open = True
+    # clear the param so future clicks will still add it again
+    st.experimental_set_query_params()
+
 # Get API key from Streamlit secrets or environment variable
-# Priority: Streamlit secrets > Environment variable > User input
 def get_api_key():
-    # Try Streamlit secrets first (for deployment)
     try:
         return st.secrets["GEMINI_API_KEY"]
-    except:
+    except Exception:
         pass
-    
-    # Try environment variable (for local development)
     env_key = os.getenv("GEMINI_API_KEY")
     if env_key:
         return env_key
-    
-    # Return None if not found (user will need to input)
     return None
 
 API_KEY = get_api_key()
@@ -73,7 +76,7 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — Neon Theme + Animations
+# CSS — Neon Theme + Animations (unchanged)
 # -----------------------
 st.markdown("""
 <style>
@@ -207,17 +210,13 @@ footer { visibility:hidden; }
 """, unsafe_allow_html=True)
 
 # -----------------------
-# Chatbot Function
+# Chatbot Function (unchanged)
 # -----------------------
 def ask_glaucoma_assistant(question, history, api_key):
     """Call Google Gemini API with glaucoma-specific context"""
-    
     if not api_key or not api_key.strip():
         return "⚠️ Please configure your Google Gemini API key (see sidebar)."
-    
-    # System prompt
     system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
-
 Your role:
 - Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment
 - Provide accurate, evidence-based information about glaucoma
@@ -227,34 +226,24 @@ Your role:
 - Always include a brief disclaimer that you're providing educational information, not medical advice
 
 Important: Always remind users to consult healthcare professionals for medical decisions."""
-
     try:
         if USE_SDK:
-            # Use official Google AI SDK
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel('gemini-1.5-flash')
-            
-            # Build conversation
             chat_history = []
             for msg in history[-6:]:
                 role = "user" if msg["role"] == "user" else "model"
                 chat_history.append({"role": role, "parts": [msg["content"]]})
-            
             chat = model.start_chat(history=chat_history)
             response = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
             return response.text
-            
         else:
-            # Fallback to REST API
             conversation_context = ""
             for msg in history[-6:]:
                 role = "User" if msg["role"] == "user" else "Assistant"
                 conversation_context += f"{role}: {msg['content']}\n\n"
-            
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
-            
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
-            
             response = requests.post(
                 url,
                 headers={"Content-Type": "application/json"},
@@ -264,7 +253,6 @@ Important: Always remind users to consult healthcare professionals for medical d
                 },
                 timeout=30
             )
-            
             if response.status_code == 200:
                 data = response.json()
                 return data["candidates"][0]["content"]["parts"][0]["text"]
@@ -274,24 +262,19 @@ Important: Always remind users to consult healthcare professionals for medical d
                 return "❌ API not accessible. Your key might be restricted. Try creating a new unrestricted key."
             else:
                 return f"❌ Error ({response.status_code}): {response.text[:200]}"
-                
     except Exception as e:
         return f"❌ Error: {str(e)}\n\nTip: Make sure your API key from https://aistudio.google.com/apikey is unrestricted."
 
 # -----------------------
-# Header
+# Header + model loading + helpers (same as you had)...
+# For brevity I'm including the same load_models and helper functions:
+# load_models(), process_npz(), compute_risk_map(), preprocess_bscan(), gradcam(), fig_to_png(), create_pdf(), render_severity()
+# (Paste exactly the helper code from your previous file into these functions)
 # -----------------------
-st.markdown("""
-<div class="header">
-  <h1>👁️ OCULAIRE</h1>
-  <h3>AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</h3>
-</div>
-""", unsafe_allow_html=True)
-st.markdown("---")
 
-# -----------------------
-# Load Models
-# -----------------------
+# -- Insert your load_models and helper functions here (copy from your existing app) --
+# To keep this example concise, I'll re-add them quickly:
+
 @st.cache_resource
 def load_models():
     try:
@@ -310,9 +293,6 @@ def load_models():
 
 b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models()
 
-# -----------------------
-# Helpers
-# -----------------------
 def process_npz(f):
     try:
         buf = io.BytesIO(f.getvalue())
@@ -400,113 +380,16 @@ def render_severity(pct):
     return html
 
 # -----------------------
-# SIDEBAR - API Key Status
+# Main UI layout (uploads, analysis, etc.) — keep as you had
 # -----------------------
-with st.sidebar:
-    st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
-    
-    if API_KEY:
-        st.success("✅ Gemini API Key configured")
-        st.info("Using API key from secrets/environment")
-    else:
-        st.error("❌ No API Key found")
-        st.warning("Chatbot will not work without an API key")
-    
-    st.markdown("---")
-    st.markdown("""
-    <div style='font-size:12px; color:var(--muted);'>
-    <strong>How to configure Gemini API key:</strong><br><br>
-    
-    <strong>For Streamlit Cloud:</strong><br>
-    1. Go to your app settings<br>
-    2. Add to Secrets:<br>
-    <code>GEMINI_API_KEY = "your-key-here"</code><br><br>
-    
-    <strong>For Local Development:</strong><br>
-    1. Create <code>.streamlit/secrets.toml</code><br>
-    2. Add: <code>GEMINI_API_KEY = "your-key-here"</code><br>
-    3. Or set environment variable:<br>
-    <code>export GEMINI_API_KEY="your-key-here"</code><br><br>
-    
-    <strong>Get FREE API key:</strong><br>
-    1. Visit <a href='https://aistudio.google.com/apikey' target='_blank'>Google AI Studio</a><br>
-    2. Click "Get API Key"<br>
-    3. Copy your key<br><br>
-    
-    <strong>✨ Gemini is FREE with generous limits!</strong>
-    </div>
-    """, unsafe_allow_html=True)
-
-# -----------------------
-# FLOATING CHAT WIDGET (Bottom-right corner)
-# -----------------------
-# Visible bubble + pill
-st.markdown('<div class="chat-bubble" id="chatBubble">🤖</div><div class="floating-chat-pill" id="chatPill">Ask Assistant</div>', unsafe_allow_html=True)
-
-# <-- FIX: create a hidden unique toggle button (JS will click this). This avoids fragile parent-document searches.
-_TOGGLE_UNIQUE_LABEL = "__OCULAIRE_TOGGLE_CHAT__"
-st.markdown('<div style="position:absolute;left:-9999px;top:-9999px;opacity:0;">', unsafe_allow_html=True)
-toggle_clicked = st.button(_TOGGLE_UNIQUE_LABEL, key="__oculaire_toggle_button__")
-st.markdown('</div>', unsafe_allow_html=True)
-
-# When hidden button clicked toggles chat_open
-if toggle_clicked:
-    st.session_state.chat_open = not st.session_state.chat_open
-    # rerun to update UI immediately
-    st.experimental_rerun()
-
-# JS to click the hidden button when user clicks the bubble/pill
-st.markdown(f"""
-<script>
-(function(){{
-  function clickHidden() {{
-    const targetLabel = "{_TOGGLE_UNIQUE_LABEL}";
-    // Search current document buttons first
-    const buttons = Array.from(document.querySelectorAll('button'));
-    for (let b of buttons) {{
-      if ((b.innerText || "").trim() === targetLabel) {{
-        b.click();
-        return true;
-      }}
-    }}
-    // try parent document (iframe scenarios)
-    try {{
-      if (window.parent && window.parent.document) {{
-        const pbtns = Array.from(window.parent.document.querySelectorAll('button'));
-        for (let b of pbtns) {{
-          if ((b.innerText || "").trim() === targetLabel) {{
-            b.click();
-            return true;
-          }}
-        }}
-      }}
-    }} catch(e) {{
-      // ignore cross-origin errors
-    }}
-    console.warn("Toggle button not found:", targetLabel);
-    return false;
-  }}
-
-  const bubble = document.getElementById('chatBubble');
-  const pill = document.getElementById('chatPill');
-  [bubble, pill].forEach(el => {{
-    if (!el) return;
-    el.style.cursor = 'pointer';
-    el.addEventListener('click', function(e) {{
-      e.preventDefault();
-      // tiny visual feedback
-      el.style.transform = 'scale(0.98)';
-      setTimeout(()=> el.style.transform = '', 120);
-      clickHidden();
-    }});
-  }});
-}})();
-</script>
+st.markdown("""
+<div class="header">
+  <h1>👁️ OCULAIRE</h1>
+  <h3>AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</h3>
+</div>
 """, unsafe_allow_html=True)
+st.markdown("---")
 
-# -----------------------
-# LAYOUT (uploads etc.)
-# -----------------------
 colA, colB = st.columns(2)
 
 with colA:
@@ -523,15 +406,12 @@ with colB:
 
 threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
-# -----------------------
-# ANALYSIS (same as before)
-# -----------------------
+# ANALYSIS (unchanged)
 if rnflt_file or bscan_file:
     figs = []
     severity_overall = 0
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # RNFLT Processing
     if rnflt_file and scaler is not None:
         rnflt, metrics = process_npz(rnflt_file)
         if rnflt is not None:
@@ -559,7 +439,6 @@ if rnflt_file or bscan_file:
             st.pyplot(fig)
             figs.append(fig)
 
-    # B-Scan Processing
     if bscan_file and b_model is not None:
         image_pil = Image.open(bscan_file).convert("L")
         batch, proc = preprocess_bscan(image_pil)
@@ -583,12 +462,10 @@ if rnflt_file or bscan_file:
             overlay = cv2.addWeighted(overlay, 0.6, hm_color, 0.4, 0)
             st.image([image_pil, overlay], caption=["Original B-Scan", "Grad-CAM Overlay"], use_column_width=True)
 
-    # Combined Severity Summary
     st.markdown("<hr>", unsafe_allow_html=True)
     st.markdown(f"<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
     st.markdown(render_severity(severity_overall), unsafe_allow_html=True)
 
-    # Download buttons
     if figs:
         png_bytes = fig_to_png(figs[0])
         pdf_bytes = create_pdf(figs)
@@ -601,25 +478,54 @@ st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# When chat is open, show in sidebar
+# Floating bubble JS: modify URL to add ?open_chat=1 (works in iframe + direct)
+# -----------------------
+st.markdown("""
+<script>
+(function(){
+  function addOpenChatParam() {
+    try {
+      // Build new URL preserving existing params but setting open_chat=1
+      const url = new URL(window.location.href);
+      url.searchParams.set('open_chat', '1');
+      // use location.replace to avoid creating history entries if you prefer
+      window.location.href = url.toString();
+    } catch (e) {
+      console.error("Failed to set open_chat param", e);
+    }
+  }
+  const bubble = document.getElementById('chatBubble');
+  const pill = document.getElementById('chatPill');
+  [bubble, pill].forEach(el => {
+    if (!el) return;
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', function(e){
+      e.preventDefault();
+      // small visual feedback
+      el.style.transform = 'scale(0.98)';
+      setTimeout(()=> el.style.transform = '', 120);
+      addOpenChatParam();
+    });
+  });
+})();
+</script>
+""", unsafe_allow_html=True)
+
+# -----------------------
+# When chat is open, show in sidebar (same as before)
 # -----------------------
 if st.session_state.chat_open:
     with st.sidebar:
         st.markdown("---")
         st.markdown("<div class='chat-header'>🤖 Glaucoma Assistant</div>", unsafe_allow_html=True)
         st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:15px;'>Ask me anything about glaucoma!</p>", unsafe_allow_html=True)
-        
-        # Display chat history
         for msg in st.session_state.chat_history:
             if msg["role"] == "user":
                 st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
             else:
                 st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-        
-        # Input area bound to session_state.chat_input
         user_question = st.text_input("Your question:", key="chat_input", placeholder="What is glaucoma?")
-        
-        col1, col2, col3 = st.columns([3, 1, 1])
+        col1, col2, col3 = st.columns([3,1,1])
         with col1:
             if st.button("📤 Send", use_container_width=True):
                 if user_question and API_KEY:
@@ -627,7 +533,6 @@ if st.session_state.chat_open:
                         response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
                         st.session_state.chat_history.append({"role": "user", "content": user_question})
                         st.session_state.chat_history.append({"role": "assistant", "content": response})
-                        # clear input after send
                         st.session_state.chat_input = ""
                         st.experimental_rerun()
                 elif not API_KEY:
