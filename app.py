@@ -188,7 +188,7 @@ Please provide a helpful, accurate response about glaucoma:"""
         
         # Call Gemini API
         response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}",
+            f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}",
             headers={
                 "Content-Type": "application/json",
             },
@@ -201,7 +201,25 @@ Please provide a helpful, accurate response about glaucoma:"""
                 "generationConfig": {
                     "temperature": 0.7,
                     "maxOutputTokens": 1000,
-                }
+                },
+                "safetySettings": [
+                    {
+                        "category": "HARM_CATEGORY_HARASSMENT",
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_HATE_SPEECH",
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        "threshold": "BLOCK_NONE"
+                    },
+                    {
+                        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                        "threshold": "BLOCK_NONE"
+                    }
+                ]
             },
             timeout=30
         )
@@ -355,7 +373,7 @@ with st.sidebar:
     st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
     
     if API_KEY:
-        st.success("✅ API Key configured")
+        st.success("✅ Gemini API Key configured")
         st.info("Using API key from secrets/environment")
     else:
         st.error("❌ No API Key found")
@@ -364,21 +382,25 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("""
     <div style='font-size:12px; color:var(--muted);'>
-    <strong>How to configure API key:</strong><br><br>
+    <strong>How to configure Gemini API key:</strong><br><br>
     
     <strong>For Streamlit Cloud:</strong><br>
     1. Go to your app settings<br>
     2. Add to Secrets:<br>
-    <code>ANTHROPIC_API_KEY = "your-key-here"</code><br><br>
+    <code>GEMINI_API_KEY = "your-key-here"</code><br><br>
     
     <strong>For Local Development:</strong><br>
     1. Create <code>.streamlit/secrets.toml</code><br>
-    2. Add: <code>ANTHROPIC_API_KEY = "your-key-here"</code><br>
+    2. Add: <code>GEMINI_API_KEY = "your-key-here"</code><br>
     3. Or set environment variable:<br>
-    <code>export ANTHROPIC_API_KEY="your-key-here"</code><br><br>
+    <code>export GEMINI_API_KEY="your-key-here"</code><br><br>
     
-    <strong>Get API key:</strong><br>
-    Visit <a href='https://console.anthropic.com' target='_blank'>console.anthropic.com</a>
+    <strong>Get FREE API key:</strong><br>
+    1. Visit <a href='https://aistudio.google.com/apikey' target='_blank'>Google AI Studio</a><br>
+    2. Click "Get API Key"<br>
+    3. Copy your key<br><br>
+    
+    <strong>✨ Gemini is FREE with generous limits!</strong>
     </div>
     """, unsafe_allow_html=True)
 
