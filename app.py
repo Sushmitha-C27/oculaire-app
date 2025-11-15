@@ -22,7 +22,7 @@ except ImportError:
 # -----------------------
 # Page Config
 # -----------------------
-st.set_page_config(page_title="OCULAIRE: Glaucoma Detection Dashboard",
+st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    layout="wide",
                    page_icon="👁️")
 
@@ -179,6 +179,7 @@ Important: Always remind users to consult healthcare professionals for medical d
             # Use official Google AI SDK
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel(MODEL_NAME)
+
             
             # Build conversation
             chat_history = []
