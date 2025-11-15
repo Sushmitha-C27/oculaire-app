@@ -15,7 +15,7 @@ import os
 # -----------------------
 # Page Config
 # -----------------------
-st.set_page_config(page_title="OCULAIRE: Glaucoma Detection",
+st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    layout="wide",
                    page_icon="👁️")
 
@@ -157,12 +157,12 @@ def ask_glaucoma_assistant(question, history, api_key):
     try:
         # Build conversation history for Gemini format
         conversation_context = ""
-        for msg in history:
+        for msg in history[-6:]:  # Keep last 3 exchanges for context
             role = "User" if msg["role"] == "user" else "Assistant"
             conversation_context += f"{role}: {msg['content']}\n\n"
         
         # System prompt to constrain responses to glaucoma topics
-        system_prompt = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
+        system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
 
 Your role:
 - Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment
@@ -175,20 +175,15 @@ Your role:
 Important disclaimers:
 - Remind users to consult healthcare professionals for medical decisions
 - Never diagnose or provide treatment recommendations
-- Focus on education and information about glaucoma
+- Focus on education and information about glaucoma"""
 
-Previous conversation:
-{conversation}
-
-User's current question: {question}
-
-Please provide a helpful, accurate response about glaucoma:"""
-
-        full_prompt = system_prompt.format(conversation=conversation_context, question=question)
+        full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
         
-        # Call Gemini API
+        # Call Gemini API - using the correct endpoint format
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
+        
         response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}",
+            url,
             headers={
                 "Content-Type": "application/json",
             },
@@ -205,19 +200,19 @@ Please provide a helpful, accurate response about glaucoma:"""
                 "safetySettings": [
                     {
                         "category": "HARM_CATEGORY_HARASSMENT",
-                        "threshold": "BLOCK_NONE"
+                        "threshold": "BLOCK_ONLY_HIGH"
                     },
                     {
                         "category": "HARM_CATEGORY_HATE_SPEECH",
-                        "threshold": "BLOCK_NONE"
+                        "threshold": "BLOCK_ONLY_HIGH"
                     },
                     {
                         "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                        "threshold": "BLOCK_NONE"
+                        "threshold": "BLOCK_ONLY_HIGH"
                     },
                     {
                         "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                        "threshold": "BLOCK_NONE"
+                        "threshold": "BLOCK_ONLY_HIGH"
                     }
                 ]
             },
@@ -229,16 +224,18 @@ Please provide a helpful, accurate response about glaucoma:"""
             try:
                 assistant_message = data["candidates"][0]["content"]["parts"][0]["text"]
                 return assistant_message
-            except (KeyError, IndexError):
-                return "❌ Unexpected response format from API."
+            except (KeyError, IndexError) as e:
+                return f"❌ Unexpected response format: {str(e)}\n\nResponse: {str(data)[:200]}"
         elif response.status_code == 400:
             error_data = response.json()
             error_msg = error_data.get("error", {}).get("message", "Bad request")
             return f"❌ API Error: {error_msg}"
         elif response.status_code == 403:
-            return "🔑 API key is invalid or doesn't have permission. Please check your Gemini API key."
+            return "🔑 API key is invalid or doesn't have permission. Please verify your Gemini API key at https://aistudio.google.com/apikey"
+        elif response.status_code == 404:
+            return "❌ API endpoint not found. Please check if your API key is valid and has Gemini API access enabled."
         else:
-            return f"❌ Error (Status {response.status_code}): Please try again."
+            return f"❌ Error (Status {response.status_code}): {response.text[:300]}"
             
     except requests.exceptions.Timeout:
         return "⏱️ Request timed out. Please try again."
