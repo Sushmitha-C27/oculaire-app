@@ -152,6 +152,7 @@ footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
 
+MODEL_NAME = "models/gemini-2.5-pro"
 # -----------------------
 # Chatbot Function
 # -----------------------
@@ -178,7 +179,7 @@ Important: Always remind users to consult healthcare professionals for medical d
         if USE_SDK:
             # Use official Google AI SDK
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel(MODEL_NAME)
             
             # Build conversation
             chat_history = []
@@ -199,7 +200,7 @@ Important: Always remind users to consult healthcare professionals for medical d
             
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
             
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
             
             response = requests.post(
                 url,
