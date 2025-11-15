@@ -15,7 +15,7 @@ import os
 # -----------------------
 # Page Config
 # -----------------------
-st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
+st.set_page_config(page_title="OCULAIRE: Glaucoma Detection",
                    layout="wide",
                    page_icon="👁️")
 
