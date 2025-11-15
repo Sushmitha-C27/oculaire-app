@@ -10,6 +10,7 @@ import io
 from matplotlib.backends.backend_pdf import PdfPages
 import requests
 import json
+import os
 
 # -----------------------
 # Page Config
@@ -23,6 +24,25 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 # -----------------------
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
+
+# Get API key from Streamlit secrets or environment variable
+# Priority: Streamlit secrets > Environment variable > User input
+def get_api_key():
+    # Try Streamlit secrets first (for deployment)
+    try:
+        return st.secrets["GEMINI_API_KEY"]
+    except:
+        pass
+    
+    # Try environment variable (for local development)
+    env_key = os.getenv("GEMINI_API_KEY")
+    if env_key:
+        return env_key
+    
+    # Return None if not found (user will need to input)
+    return None
+
+API_KEY = get_api_key()
 
 # -----------------------
 # Neon Matplotlib Config
@@ -128,18 +148,22 @@ footer { visibility:hidden; }
 # -----------------------
 # Chatbot Function
 # -----------------------
-def ask_glaucoma_assistant(question, history):
-    """Call Claude API with glaucoma-specific context"""
+def ask_glaucoma_assistant(question, history, api_key):
+    """Call Google Gemini API with glaucoma-specific context"""
+    
+    if not api_key or not api_key.strip():
+        return "⚠️ Please configure your Google Gemini API key (see sidebar)."
+    
     try:
-        # Build conversation history
-        messages = []
+        # Build conversation history for Gemini format
+        conversation_context = ""
         for msg in history:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-        messages.append({"role": "user", "content": question})
+            role = "User" if msg["role"] == "user" else "Assistant"
+            conversation_context += f"{role}: {msg['content']}\n\n"
         
         # System prompt to constrain responses to glaucoma topics
         system_prompt = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
-        
+
 Your role:
 - Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment
 - Provide accurate, evidence-based information about glaucoma
@@ -151,35 +175,57 @@ Your role:
 Important disclaimers:
 - Remind users to consult healthcare professionals for medical decisions
 - Never diagnose or provide treatment recommendations
-- Focus on education and information about glaucoma"""
+- Focus on education and information about glaucoma
 
+Previous conversation:
+{conversation}
+
+User's current question: {question}
+
+Please provide a helpful, accurate response about glaucoma:"""
+
+        full_prompt = system_prompt.format(conversation=conversation_context, question=question)
+        
+        # Call Gemini API
         response = requests.post(
-            "https://api.anthropic.com/v1/messages",
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}",
             headers={
                 "Content-Type": "application/json",
-                "anthropic-version": "2023-06-01"
             },
             json={
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 1000,
-                "system": system_prompt,
-                "messages": messages
+                "contents": [{
+                    "parts": [{
+                        "text": full_prompt
+                    }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": 1000,
+                }
             },
             timeout=30
         )
         
         if response.status_code == 200:
             data = response.json()
-            assistant_message = ""
-            for block in data.get("content", []):
-                if block.get("type") == "text":
-                    assistant_message += block.get("text", "")
-            return assistant_message
+            try:
+                assistant_message = data["candidates"][0]["content"]["parts"][0]["text"]
+                return assistant_message
+            except (KeyError, IndexError):
+                return "❌ Unexpected response format from API."
+        elif response.status_code == 400:
+            error_data = response.json()
+            error_msg = error_data.get("error", {}).get("message", "Bad request")
+            return f"❌ API Error: {error_msg}"
+        elif response.status_code == 403:
+            return "🔑 API key is invalid or doesn't have permission. Please check your Gemini API key."
         else:
-            return f"Sorry, I encountered an error (Status {response.status_code}). Please try again."
+            return f"❌ Error (Status {response.status_code}): Please try again."
             
+    except requests.exceptions.Timeout:
+        return "⏱️ Request timed out. Please try again."
     except Exception as e:
-        return f"Sorry, I couldn't process your question. Error: {str(e)}"
+        return f"❌ Error: {str(e)}"
 
 # -----------------------
 # Header
@@ -303,6 +349,40 @@ def render_severity(pct):
     return html
 
 # -----------------------
+# SIDEBAR - API Key Status
+# -----------------------
+with st.sidebar:
+    st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
+    
+    if API_KEY:
+        st.success("✅ API Key configured")
+        st.info("Using API key from secrets/environment")
+    else:
+        st.error("❌ No API Key found")
+        st.warning("Chatbot will not work without an API key")
+    
+    st.markdown("---")
+    st.markdown("""
+    <div style='font-size:12px; color:var(--muted);'>
+    <strong>How to configure API key:</strong><br><br>
+    
+    <strong>For Streamlit Cloud:</strong><br>
+    1. Go to your app settings<br>
+    2. Add to Secrets:<br>
+    <code>ANTHROPIC_API_KEY = "your-key-here"</code><br><br>
+    
+    <strong>For Local Development:</strong><br>
+    1. Create <code>.streamlit/secrets.toml</code><br>
+    2. Add: <code>ANTHROPIC_API_KEY = "your-key-here"</code><br>
+    3. Or set environment variable:<br>
+    <code>export ANTHROPIC_API_KEY="your-key-here"</code><br><br>
+    
+    <strong>Get API key:</strong><br>
+    Visit <a href='https://console.anthropic.com' target='_blank'>console.anthropic.com</a>
+    </div>
+    """, unsafe_allow_html=True)
+
+# -----------------------
 # CHATBOT SECTION (at top)
 # -----------------------
 with st.expander("💬 Ask Glaucoma Assistant", expanded=False):
@@ -324,11 +404,14 @@ with st.expander("💬 Ask Glaucoma Assistant", expanded=False):
         send_button = st.button("📤 Send", use_container_width=True)
     
     if send_button and user_question:
-        with st.spinner("🔍 Searching for answers..."):
-            response = ask_glaucoma_assistant(user_question, st.session_state.chat_history)
-            st.session_state.chat_history.append({"role": "user", "content": user_question})
-            st.session_state.chat_history.append({"role": "assistant", "content": response})
-            st.rerun()
+        if not API_KEY:
+            st.error("❌ Cannot send message: API key not configured. See sidebar for setup instructions.")
+        else:
+            with st.spinner("🔍 Searching for answers..."):
+                response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
+                st.session_state.chat_history.append({"role": "user", "content": user_question})
+                st.session_state.chat_history.append({"role": "assistant", "content": response})
+                st.rerun()
     
     if st.button("🗑️ Clear Chat History", use_container_width=False):
         st.session_state.chat_history = []
