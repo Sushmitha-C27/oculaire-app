@@ -21,8 +21,6 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 # -----------------------
 # Initialize Session State for Chat
 # -----------------------
-if 'chat_open' not in st.session_state:
-    st.session_state.chat_open = False
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
@@ -43,7 +41,7 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — Neon Theme + Animations + Chatbot
+# CSS — Neon Theme + Animations
 # -----------------------
 st.markdown("""
 <style>
@@ -97,32 +95,30 @@ st.markdown("""
 @keyframes pulse { 0%{transform:scale(1);} 50%{transform:scale(1.06);} 100%{transform:scale(1);} }
 .download-btns { margin-top:14px; display:flex; gap:10px; justify-content:center; }
 
-/* Chatbot Button */
-.chat-fab {
-  position: fixed;
-  bottom: 30px;
-  right: 30px;
-  width: 60px;
-  height: 60px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--neonA), var(--neonB));
-  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 30px rgba(255,64,196,0.4);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 28px;
-  z-index: 1000;
-  animation: float 3s ease-in-out infinite;
-  border: none;
+/* Chat message styling */
+.user-msg {
+  background: linear-gradient(135deg, rgba(0,245,255,0.15), rgba(0,245,255,0.05));
+  border-left: 3px solid var(--neonA);
+  padding: 12px;
+  border-radius: 8px;
+  margin: 8px 0;
 }
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
+.assistant-msg {
+  background: linear-gradient(135deg, rgba(255,64,196,0.15), rgba(255,64,196,0.05));
+  border-left: 3px solid var(--neonB);
+  padding: 12px;
+  border-radius: 8px;
+  margin: 8px 0;
 }
-.chat-fab:hover {
-  box-shadow: 0 0 40px rgba(0,245,255,0.8), 0 0 40px rgba(255,64,196,0.6);
-  transform: scale(1.1);
+.chat-header {
+  text-align: center;
+  background: linear-gradient(90deg, var(--neonA), var(--neonB));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+  font-size: 24px;
+  margin-bottom: 20px;
+  text-shadow: 0 0 20px rgba(0,245,255,0.3);
 }
 
 footer { visibility:hidden; }
@@ -149,7 +145,8 @@ Your role:
 - Provide accurate, evidence-based information about glaucoma
 - Explain medical terminology clearly
 - If asked about non-glaucoma topics, politely redirect to glaucoma-related questions
-- Always include a disclaimer that you're providing educational information, not medical advice
+- Keep responses concise and under 200 words
+- Always include a brief disclaimer that you're providing educational information, not medical advice
 
 Important disclaimers:
 - Remind users to consult healthcare professionals for medical decisions
@@ -167,7 +164,8 @@ Important disclaimers:
                 "max_tokens": 1000,
                 "system": system_prompt,
                 "messages": messages
-            }
+            },
+            timeout=30
         )
         
         if response.status_code == 200:
@@ -181,7 +179,7 @@ Important disclaimers:
             return f"Sorry, I encountered an error (Status {response.status_code}). Please try again."
             
     except Exception as e:
-        return f"Sorry, I couldn't process your question: {str(e)}"
+        return f"Sorry, I couldn't process your question. Error: {str(e)}"
 
 # -----------------------
 # Header
@@ -305,6 +303,40 @@ def render_severity(pct):
     return html
 
 # -----------------------
+# CHATBOT SECTION (at top)
+# -----------------------
+with st.expander("💬 Ask Glaucoma Assistant", expanded=False):
+    st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:var(--muted); font-size:14px; margin-bottom:20px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
+    
+    # Display chat history
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div class='assistant-msg'><strong>🤖 Assistant:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+    
+    # Input area
+    col1, col2 = st.columns([5, 1])
+    with col1:
+        user_question = st.text_input("Your question:", key="user_input", placeholder="e.g., What is glaucoma? How does OCT detect it?", label_visibility="collapsed")
+    with col2:
+        send_button = st.button("📤 Send", use_container_width=True)
+    
+    if send_button and user_question:
+        with st.spinner("🔍 Searching for answers..."):
+            response = ask_glaucoma_assistant(user_question, st.session_state.chat_history)
+            st.session_state.chat_history.append({"role": "user", "content": user_question})
+            st.session_state.chat_history.append({"role": "assistant", "content": response})
+            st.rerun()
+    
+    if st.button("🗑️ Clear Chat History", use_container_width=False):
+        st.session_state.chat_history = []
+        st.rerun()
+
+st.markdown("---")
+
+# -----------------------
 # LAYOUT
 # -----------------------
 colA, colB = st.columns(2)
@@ -396,63 +428,6 @@ if rnflt_file or bscan_file:
         st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
         st.download_button("📄 Download Full Report (PDF)", data=pdf_bytes, file_name="oculaire_report.pdf", mime="application/pdf")
         st.markdown("</div>", unsafe_allow_html=True)
-
-# -----------------------
-# CHATBOT INTERFACE
-# -----------------------
-# Floating chat button
-chat_col1, chat_col2, chat_col3 = st.columns([6, 1, 1])
-with chat_col3:
-    if st.button("💬", key="chat_toggle", help="Ask about glaucoma"):
-        st.session_state.chat_open = not st.session_state.chat_open
-
-# Chat interface in sidebar when open
-if st.session_state.chat_open:
-    with st.sidebar:
-        st.markdown("""
-        <div style='text-align:center; margin-bottom:20px;'>
-            <h2 style='background: linear-gradient(90deg, var(--neonA), var(--neonB)); 
-                       -webkit-background-clip:text; -webkit-text-fill-color:transparent;'>
-                🤖 Glaucoma Assistant
-            </h2>
-            <p style='color:var(--muted); font-size:13px;'>Ask me anything about glaucoma!</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Display chat history
-        chat_container = st.container()
-        with chat_container:
-            for msg in st.session_state.chat_history:
-                if msg["role"] == "user":
-                    st.markdown(f"""
-                    <div style='background: rgba(0,245,255,0.1); padding:10px; border-radius:10px; margin:5px 0;'>
-                        <strong>You:</strong> {msg['content']}
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.markdown(f"""
-                    <div style='background: rgba(255,64,196,0.1); padding:10px; border-radius:10px; margin:5px 0;'>
-                        <strong>Assistant:</strong> {msg['content']}
-                    </div>
-                    """, unsafe_allow_html=True)
-        
-        # Input area
-        user_question = st.text_input("Your question:", key="user_input", placeholder="e.g., What is glaucoma?")
-        
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            if st.button("Send", use_container_width=True):
-                if user_question:
-                    with st.spinner("Thinking..."):
-                        response = ask_glaucoma_assistant(user_question, st.session_state.chat_history)
-                        st.session_state.chat_history.append({"role": "user", "content": user_question})
-                        st.session_state.chat_history.append({"role": "assistant", "content": response})
-                        st.rerun()
-        
-        with col2:
-            if st.button("Clear", use_container_width=True):
-                st.session_state.chat_history = []
-                st.rerun()
 
 st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
