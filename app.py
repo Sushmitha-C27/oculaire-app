@@ -31,6 +31,10 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 # -----------------------
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
+if "chat_open" not in st.session_state:
+    st.session_state["chat_open"] = False
+if "chat_input" not in st.session_state:
+    st.session_state["chat_input"] = ""
 
 # Get API key from Streamlit secrets or environment variable
 # Priority: Streamlit secrets > Environment variable > User input
