@@ -29,21 +29,8 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 # -----------------------
 # Initialize Session State for Chat
 # -----------------------
-_defaults = {
-    "chat_history": [],        # list of {"role": "...", "content": "..."}
-    "chat_open": False,        # whether sidebar chat is open
-    "chat_input": "",          # current chat input text
-    "genai_available": False,  # optional flag if SDK configured
-    "genai_model": None,       # optional SDK model handle
-}
-
-for k, v in _defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
-
-# helper to read safely (optional convenience)
-def ss(key, default=None):
-    return st.session_state.get(key, default)
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
 
 # Get API key from Streamlit secrets or environment variable
 # Priority: Streamlit secrets > Environment variable > User input
@@ -253,7 +240,7 @@ st.markdown("""
 footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
-MODEL_NAME = "models/gemini-2.5-pro"
+
 # -----------------------
 # Chatbot Function
 # -----------------------
@@ -280,7 +267,7 @@ Important: Always remind users to consult healthcare professionals for medical d
         if USE_SDK:
             # Use official Google AI SDK
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(MODEL_NAME)
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
             # Build conversation
             chat_history = []
@@ -300,10 +287,8 @@ Important: Always remind users to consult healthcare professionals for medical d
                 conversation_context += f"{role}: {msg['content']}\n\n"
             
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
-
-            url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
-
             
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
             
             response = requests.post(
                 url,
@@ -593,43 +578,46 @@ st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCUL
 # -----------------------
 # FLOATING CHAT WIDGET (Bottom-right corner)
 # -----------------------
-# Create a floating button that opens chat in sidebar
-st.markdown("""
-<div class="floating-chat-bubble" id="chatBubble">
-    <span class="robot-icon">🤖</span>
-    <span class="chat-text">Ask Assistant</span>
-</div>
 
+# Toggle button at the bottom (styled as floating widget)
+col1, col2 = st.columns([10, 1])
+with col2:
+    if st.button("🤖", key="chat_toggle", help="Ask Glaucoma Assistant"):
+        st.session_state.chat_open = not st.session_state.chat_open
+        st.rerun()
+
+# Style the button to float
+st.markdown("""
 <style>
-.floating-chat-bubble {
-    position: fixed;
-    bottom: 30px;
-    right: 30px;
-    width: auto;
-    min-width: 180px;
-    padding: 18px 28px;
-    background: linear-gradient(135deg, rgba(0,245,255,0.25), rgba(255,64,196,0.25));
-    border: 2px solid transparent;
-    border-radius: 50px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    z-index: 9999;
-    font-weight: 800;
-    font-size: 17px;
-    color: #e6faff;
-    backdrop-filter: blur(20px);
+/* Hide the column padding to make button float better */
+div[data-testid="column"]:last-child {
+    position: fixed !important;
+    bottom: 30px !important;
+    right: 30px !important;
+    width: auto !important;
+    z-index: 9999 !important;
+}
+
+/* Style the chat toggle button */
+div[data-testid="column"]:last-child button {
+    width: 200px !important;
+    height: 70px !important;
+    font-size: 42px !important;
+    background: linear-gradient(135deg, rgba(0,245,255,0.25), rgba(255,64,196,0.25)) !important;
+    border: 2px solid transparent !important;
+    border-radius: 50px !important;
+    backdrop-filter: blur(20px) !important;
     box-shadow: 
         0 0 40px rgba(0,245,255,0.4),
         0 0 60px rgba(255,64,196,0.3),
-        0 10px 40px rgba(0,0,0,0.5);
-    animation: gentleFloat 4s ease-in-out infinite, borderGlow 3s ease-in-out infinite;
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        0 10px 40px rgba(0,0,0,0.5) !important;
+    animation: gentleFloat 4s ease-in-out infinite, borderGlow 3s ease-in-out infinite !important;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    position: relative !important;
+    overflow: visible !important;
 }
 
-.floating-chat-bubble::before {
+div[data-testid="column"]:last-child button::before {
     content: '';
     position: absolute;
     top: -2px;
@@ -643,41 +631,18 @@ st.markdown("""
     background-size: 200% 200%;
 }
 
-.robot-icon {
-    font-size: 38px;
-    animation: robotPulse 2s ease-in-out infinite;
-    filter: drop-shadow(0 0 10px rgba(0,245,255,0.8));
-}
-
-.chat-text {
-    font-weight: 900;
-    letter-spacing: 0.5px;
-    text-shadow: 0 0 10px rgba(0,245,255,0.5);
-}
-
-.floating-chat-bubble:hover {
-    transform: translateY(-5px) scale(1.05);
-    background: linear-gradient(135deg, rgba(0,245,255,0.35), rgba(255,64,196,0.35));
+div[data-testid="column"]:last-child button:hover {
+    transform: translateY(-5px) scale(1.05) !important;
+    background: linear-gradient(135deg, rgba(0,245,255,0.35), rgba(255,64,196,0.35)) !important;
     box-shadow: 
         0 0 50px rgba(0,245,255,0.6),
         0 0 80px rgba(255,64,196,0.5),
-        0 15px 50px rgba(0,0,0,0.6);
+        0 15px 50px rgba(0,0,0,0.6) !important;
 }
 
 @keyframes gentleFloat {
     0%, 100% { transform: translateY(0px); }
     50% { transform: translateY(-12px); }
-}
-
-@keyframes robotPulse {
-    0%, 100% { 
-        transform: scale(1);
-        filter: drop-shadow(0 0 10px rgba(0,245,255,0.8));
-    }
-    50% { 
-        transform: scale(1.15);
-        filter: drop-shadow(0 0 20px rgba(255,64,196,1));
-    }
 }
 
 @keyframes borderRotate {
@@ -739,28 +704,3 @@ if st.session_state.chat_open:
             if st.button("✖️", use_container_width=True):
                 st.session_state.chat_open = False
                 st.rerun()
-
-# Toggle button (invisible, just for state management)
-if st.button("Toggle Chat", key="toggle_chat_hidden", type="secondary"):
-    st.session_state.chat_open = not st.session_state.chat_open
-    st.rerun()
-
-# JavaScript to make the bubble clickable
-st.markdown("""
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const bubble = document.getElementById('chatBubble');
-    if (bubble) {
-        bubble.addEventListener('click', function() {
-            // Find and click the Streamlit button
-            const buttons = window.parent.document.querySelectorAll('button');
-            buttons.forEach(btn => {
-                if (btn.textContent.includes('Toggle Chat')) {
-                    btn.click();
-                }
-            });
-        });
-    }
-});
-</script>
-""", unsafe_allow_html=True)
