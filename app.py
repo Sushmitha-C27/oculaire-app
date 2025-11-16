@@ -1,32 +1,44 @@
-# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (robust bubble + pill + fallback)
-import streamlit as st
-import numpy as np
+# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (full file)
+# Notes:
+# - Paste this file into your Streamlit app directory and run `streamlit run app.py`.
+# - Set GEMINI_API_KEY in Streamlit secrets or environment to enable real AI responses.
+# - If the google.generativeai SDK isn't installed the REST fallback will be used.
+# - MODEL_NAME is used for SDK/REST calls.
+
+import os
+import io
+import time
+import json
+import base64
 import joblib
-import tensorflow as tf
+import numpy as np
 import matplotlib.pyplot as plt
+import tensorflow as tf
 from PIL import Image
 import cv2
-import io
 from matplotlib.backends.backend_pdf import PdfPages
-import os
+import streamlit as st
 
-# Try to import google.generativeai, fallback to requests
+# Try to import google.generativeai; otherwise we'll use requests for REST fallback
 try:
     import google.generativeai as genai
     USE_SDK = True
 except Exception:
     import requests
-    import json
     USE_SDK = False
+
+# Model name for Gemini / REST
+MODEL_NAME = "models/gemini-2.5-pro"
 
 # -----------------------
 # Page Config
 # -----------------------
 st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
-                   layout="wide", page_icon="👁️")
+                   layout="wide",
+                   page_icon="👁️")
 
 # -----------------------
-# Session state defaults
+# Session state defaults (prevent AttributeError)
 # -----------------------
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
@@ -36,28 +48,26 @@ if 'chat_input' not in st.session_state:
     st.session_state.chat_input = ""
 
 # -----------------------
-# Query param fallback: if ?oculaire_toggle=1 present toggle the chat
-# This provides a robust fallback (works even if JS is restricted)
-params = st.experimental_get_query_params()
-if 'oculaire_toggle' in params:
-    # toggle and remove param
-    st.session_state.chat_open = not st.session_state.chat_open
-    # clear params
-    st.experimental_set_query_params()
-
+# Helper: get API key
+# Priority: Streamlit secrets > env var
 # -----------------------
-# Get API key from Streamlit secrets or environment variable
 def get_api_key():
     try:
-        return st.secrets.get("GEMINI_API_KEY", None)
+        # support both top-level and nested key names
+        if "GEMINI_API_KEY" in st.secrets:
+            return st.secrets["GEMINI_API_KEY"]
+        if "gemini" in st.secrets and "api_key" in st.secrets["gemini"]:
+            return st.secrets["gemini"]["api_key"]
     except Exception:
         pass
-    return os.environ.get("GEMINI_API_KEY", None)
+    # environment fallback
+    return os.environ.get("GEMINI_API_KEY") or os.environ.get("GENAI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or None
 
 API_KEY = get_api_key()
 
 # -----------------------
-# Neon Matplotlib Config
+# Plot styling (neon)
+# -----------------------
 plt.style.use('dark_background')
 plt.rcParams.update({
     "figure.facecolor": "#050612",
@@ -72,7 +82,8 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — Neon Theme + Floating Bubble + Pill
+# CSS (neon theme + floating chat)
+# -----------------------
 st.markdown("""
 <style>
 :root {
@@ -83,215 +94,38 @@ st.markdown("""
   --muted:#a4b1c9;
 }
 .stApp { background: radial-gradient(circle at 20% 20%, #091133, #020208 90%); color: #e6faff; font-family: 'Plus Jakarta Sans', Inter, system-ui; }
-
-/* Header */
 .header { text-align:center; margin-top:8px; margin-bottom:6px; }
-.header h1 { font-size:42px; font-weight:900; letter-spacing:3px;
-  background: linear-gradient(90deg, var(--neonA), var(--neonB));
-  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
-  text-shadow: 0 0 20px rgba(0,245,255,0.7), 0 0 35px rgba(255,64,196,0.4);
-}
+.header h1 { font-size:42px; font-weight:900; letter-spacing:3px; background: linear-gradient(90deg, var(--neonA), var(--neonB)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-shadow: 0 0 20px rgba(0,245,255,0.7), 0 0 35px rgba(255,64,196,0.4); }
 .header h3 { color:var(--muted); font-weight:400; font-size:14px; }
 
 /* Cards */
-.card { background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
-  border:1px solid rgba(255,255,255,0.04); box-shadow: 0 0 25px rgba(0,245,255,0.04);
-  border-radius:12px; padding:14px; }
-.uploader-card { background:#0d1720; padding:12px; border-radius:8px; border:1px solid rgba(255,255,255,0.03); }
-
-.metric-label { color:var(--muted); font-size:12px; }
-.large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.35); }
+.card { background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); border:1px solid rgba(255,255,255,0.04); box-shadow: 0 0 25px rgba(0,245,255,0.04); border-radius:12px; padding:14px; }
 
 /* Severity bar */
 .sev-wrap { margin-top:12px; }
 .sev-outer { height:18px; width:100%; background: rgba(255,255,255,0.04); border-radius:14px; overflow:hidden; }
-.sev-inner { height:100%; width:0%; background: linear-gradient(90deg,var(--neonA),var(--neonB));
-  border-radius:14px; box-shadow: 0 0 25px rgba(0,245,255,0.55); transition: width 1s cubic-bezier(.2,.9,.2,1); }
-.sev-chip { margin-top:8px; display:inline-block; padding:6px 12px; border-radius:12px; font-weight:800; font-size:14px; color:#021617;
-  background: linear-gradient(90deg, rgba(0,245,255,0.95), rgba(255,64,196,0.95)); box-shadow: 0 0 20px rgba(0,245,255,0.3); animation: pulse 1.6s infinite; }
+.sev-inner { height:100%; width:0%; background: linear-gradient(90deg,var(--neonA),var(--neonB)); border-radius:14px; box-shadow: 0 0 25px rgba(0,245,255,0.55); transition: width 1s cubic-bezier(.2,.9,.2,1); }
+.sev-chip { margin-top:8px; display:inline-block; padding:6px 12px; border-radius:12px; font-weight:800; font-size:14px; color:#021617; background: linear-gradient(90deg, rgba(0,245,255,0.95), rgba(255,64,196,0.95)); box-shadow: 0 0 20px rgba(0,245,255,0.3); animation: pulse 1.6s infinite; }
 @keyframes pulse { 0%{transform:scale(1);} 50%{transform:scale(1.05);} 100%{transform:scale(1);} }
 
-/* Floating bubble */
-.chat-bubble {
-  position: fixed;
-  bottom: 30px;
-  right: 30px;
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--neonA), var(--neonB));
-  box-shadow: 0 8px 40px rgba(0,245,255,0.18), 0 0 40px rgba(255,64,196,0.18);
-  display:flex; align-items:center; justify-content:center; font-size:34px; color:#021617;
-  cursor:pointer; z-index:9999;
-  transition: transform .12s ease;
-}
-.chat-bubble:hover { transform: scale(1.06); }
+/* Floating bubble/pill */
+.chat-bubble { position: fixed; bottom: 30px; right: 30px; width:64px; height:64px; border-radius:50%; background: linear-gradient(135deg,#00f5ff,#ff40c4); display:flex; align-items:center; justify-content:center; font-size:28px; cursor:pointer; z-index:9999; box-shadow:0 12px 40px rgba(0,0,0,0.6); }
+.chat-pill { position: fixed; bottom: 36px; right: 110px; background: linear-gradient(135deg, rgba(0,245,255,0.08), rgba(255,64,196,0.06)); padding:12px 18px; border-radius:30px; color:#e6faff; font-weight:800; cursor:pointer; z-index:9999; box-shadow:0 8px 40px rgba(0,0,0,0.45); }
 
-/* Floating pill (text next to bubble) */
-.chat-pill {
-  position: fixed;
-  bottom: 38px;
-  right: 115px;
-  background: linear-gradient(90deg, rgba(0,245,255,0.08), rgba(255,64,196,0.06));
-  padding: 12px 18px;
-  border-radius: 28px;
-  color: #e6faff;
-  font-weight: 800;
-  z-index:9999;
-  cursor:pointer;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.4);
-}
-.chat-pill:hover { transform: translateY(-6px); }
+/* Sidebar chat header */
+.chat-header { text-align:center; font-weight:800; color:#e6faff; }
 
-/* tiny visible fallback link area (useful if JS can't click hidden button) */
-.chat-fallback {
-  position: fixed;
-  bottom: 100px;
-  right: 30px;
-  z-index: 9999;
-  font-size:12px;
-  color: #a4b1c9;
-  opacity: 0.9;
-}
+/* Chat message styles */
+.user-msg { background: linear-gradient(135deg, rgba(0,245,255,0.08), rgba(0,245,255,0.02)); padding:8px; border-radius:8px; margin:6px 0; }
+.assistant-msg { background: linear-gradient(135deg, rgba(255,64,196,0.06), rgba(255,64,196,0.02)); padding:8px; border-radius:8px; margin:6px 0; }
+
+footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
 
 # -----------------------
-# Chat assistant logic (safe fallbacks)
-MODEL_NAME = "models/gemini-2.5-pro"
-
-def ask_glaucoma_assistant(question, history, api_key):
-    """Call Google Gemini API with glaucoma-specific context or fallback to simple rule replies."""
-    if not api_key:
-        return "⚠️ Please configure your Gemini API key (set GEMINI_API_KEY in Streamlit secrets or environment)."
-
-    system_instruction = (
-        "You are a specialized assistant for glaucoma. Answer only glaucoma-related questions, "
-        "explain terms, be concise, and include a brief educational-only disclaimer."
-    )
-
-    try:
-        if USE_SDK:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(MODEL_NAME)
-            chat_history = []
-            for msg in history[-6:]:
-                role = "user" if msg.get("role") == "user" else "model"
-                chat_history.append({"role": role, "parts": [msg.get("content","")]})
-            chat = model.start_chat(history=chat_history)
-            resp = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
-            return getattr(resp, "text", str(resp))
-        else:
-            # fallback REST call
-            conversation_context = ""
-            for msg in history[-6:]:
-                role = "User" if msg.get("role") == "user" else "Assistant"
-                conversation_context += f"{role}: {msg.get('content','')}\n\n"
-            full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
-            resp = requests.post(url, headers={"Content-Type":"application/json"}, json={
-                "contents":[{"parts":[{"text": full_prompt}]}],
-                "generationConfig":{"temperature":0.2,"maxOutputTokens":400}
-            }, timeout=30)
-            if resp.status_code == 200:
-                d = resp.json()
-                return d["candidates"][0]["content"]["parts"][0]["text"]
-            else:
-                return f"⚠️ API Error: {resp.status_code} - {resp.text[:200]}"
-    except Exception as e:
-        # safe local fallback reply generator
-        low = question.lower()
-        if "rnflt" in low or "retinal" in low:
-            return "RNFLT = Retinal Nerve Fiber Layer Thickness — measured by OCT and useful to detect thinning in glaucoma. (Educational only — not medical advice.)"
-        if "what is glaucoma" in low or "what is a glaucoma" in low:
-            return "Glaucoma is a group of eye diseases that can damage the optic nerve, often associated with raised intraocular pressure. Early detection is important. (Educational only.)"
-        return f"⚠️ Assistant error: {str(e)} — fallback reply: I can answer glaucoma-focused questions. (Educational only.)"
-
+# Header
 # -----------------------
-# Hidden toggle button strategy (primary mechanism)
-# We'll create a hidden Streamlit button with a unique label and key.
-_TOGGLE_LABEL = "__OCULAIRE_TOGGLE_CHAT__"
-_toggle_clicked = st.button(_TOGGLE_LABEL, key="__oculaire_hidden_toggle__", help="hidden toggle (do not click)")
-
-if _toggle_clicked:
-    st.session_state.chat_open = not st.session_state.chat_open
-    # immediate rerun to reflect new sidebar state
-    st.experimental_rerun()
-
-# -----------------------
-# Floating bubble + pill HTML (user clicks these)
-st.markdown(f"""
-<div class="chat-bubble" id="oculaireBubble">🤖</div>
-<div class="chat-pill" id="oculairePill"><a id="oculairePillLink" href="?oculaire_toggle=1" style="color:inherit;text-decoration:none">Ask Assistant</a></div>
-
-<!-- small hint for fallback (visually subtle) -->
-<div class="chat-fallback">If the bubble doesn't open, click the pill text or refresh.</div>
-
-<script>
-(function(){
-  const label = "{_TOGGLE_LABEL}";
-  // This function attempts multiple heuristics to find the Streamlit button and click it
-  function tryClickButton() {
-    // 1) Find by exact innerText match among all buttons
-    let btns = Array.from(document.querySelectorAll('button'));
-    for (let b of btns) {
-      try {
-        if ((b.innerText || "").trim() === label) { b.click(); return true; }
-        // sometimes buttons have nested spans - compare normalized text
-        if ((b.textContent || "").trim() === label) { b.click(); return true; }
-      } catch(e){}
-    }
-    // 2) Try searching parent document (iframe parent scenarios)
-    try {
-      if (window.parent && window.parent.document) {
-        let pbtns = Array.from(window.parent.document.querySelectorAll('button'));
-        for (let b of pbtns) {
-          try {
-            if ((b.innerText || "").trim() === label) { b.click(); return true; }
-            if ((b.textContent || "").trim() === label) { b.click(); return true; }
-          } catch(e){}
-        }
-      }
-    } catch(e){}
-    // 3) Try clicking any button whose aria-label or value contains our token
-    for (let b of btns) {
-      try {
-        if ((b.getAttribute('aria-label')||'').includes('__oculaire') || (b.value||'').includes('__oculaire')) { b.click(); return true; }
-      } catch(e){}
-    }
-    // 4) Last resort: dispatch a synthetic click event on the first button (avoid if no match)
-    if (btns.length>0) {
-      try { btns[0].dispatchEvent(new MouseEvent('click')); return true; } catch(e){}
-    }
-    return false;
-  }
-
-  const bubble = document.getElementById('oculaireBubble');
-  const pill = document.getElementById('oculairePill');
-  [bubble, pill].forEach(el=>{
-    if(!el) return;
-    el.style.cursor='pointer';
-    el.addEventListener('click', function(e){
-      e.preventDefault();
-      // slight visual feedback
-      el.style.transform='scale(0.98)';
-      setTimeout(()=> el.style.transform='', 120);
-      // try JS click hidden Streamlit button
-      const ok = tryClickButton();
-      // if not ok, the pill link already navigates to ?oculaire_toggle=1 which the app reads as fallback
-      if(!ok) {
-        // optional: navigate to query param fallback (same effect)
-        const href = document.getElementById('oculairePillLink')?.getAttribute('href');
-        if(href) { window.location.href = href; }
-      }
-    });
-  });
-})();
-</script>
-""", unsafe_allow_html=True)
-
-# -----------------------
-# Header UI
 st.markdown("""
 <div class="header">
   <h1>👁️ OCULAIRE</h1>
@@ -301,9 +135,11 @@ st.markdown("""
 st.markdown("---")
 
 # -----------------------
-# Load Models & Artifacts (cached)
+# Load models & artifacts (cached)
+# -----------------------
 @st.cache_resource
 def load_models_and_artifacts():
+    # B-scan CNN (optional)
     try:
         b_model = tf.keras.models.load_model("bscan_cnn.h5", compile=False)
     except Exception:
@@ -321,7 +157,8 @@ def load_models_and_artifacts():
 b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models_and_artifacts()
 
 # -----------------------
-# Helper functions (same as your prior helpers)
+# Helpers (RNFLT/B-scan + plotting)
+# -----------------------
 def process_npz_file(f):
     try:
         buf = io.BytesIO(f.getvalue())
@@ -411,33 +248,170 @@ def render_severity_html(pct):
     return html
 
 # -----------------------
-# Upload UI
+# Chat assistant backend (SDK or REST fallback)
+# -----------------------
+def ask_glaucoma_assistant(question, history, api_key):
+    """Call Gemini (SDK if available else REST). Returns string reply."""
+    if not api_key:
+        return "⚠️ No Gemini API key configured. Add GEMINI_API_KEY in Streamlit secrets or environment."
+
+    system_instruction = (
+        "You are a specialized medical assistant focused exclusively on glaucoma. "
+        "Answer only glaucoma/OCT/RNFLT related questions. Keep responses concise, include brief disclaimer 'educational only'."
+    )
+
+    # Use recent history for context
+    try:
+        recent = history[-6:]
+    except Exception:
+        recent = []
+
+    if USE_SDK:
+        try:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(MODEL_NAME)
+            chat_history = []
+            for msg in recent:
+                role = "user" if msg["role"] == "user" else "model"
+                chat_history.append({"role": role, "parts": [msg["content"]]})
+            chat = model.start_chat(history=chat_history)
+            response = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
+            return getattr(response, "text", str(response))
+        except Exception as e:
+            return f"⚠️ SDK error: {e}"
+    else:
+        # REST fallback (Generative Language API)
+        try:
+            conversation_context = ""
+            for msg in recent:
+                role = "User" if msg["role"] == "user" else "Assistant"
+                conversation_context += f"{role}: {msg['content']}\n\n"
+            full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
+            # Use v1beta generativelanguage endpoint (model name path differs by product; this example uses generative endpoint)
+            url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
+            payload = {
+                "contents": [{"parts": [{"text": full_prompt}]}],
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 400}
+            }
+            resp = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=20)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            elif resp.status_code == 403:
+                return "🔑 API key invalid or restricted (403)."
+            else:
+                return f"⚠️ REST error ({resp.status_code}): {resp.text[:200]}"
+        except Exception as e:
+            return f"⚠️ REST call error: {e}"
+
+# -----------------------
+# Sidebar: API key status & instructions
+# -----------------------
+with st.sidebar:
+    st.markdown("<div style='font-weight:800; color:#e6faff; text-align:center;'>🔑 API Status</div>", unsafe_allow_html=True)
+    if API_KEY:
+        st.success("✅ Gemini API Key configured")
+        st.info("Key loaded from secrets/environment")
+    else:
+        st.error("❌ No API Key found")
+        st.warning("Chatbot will use local fallback until you add GEMINI_API_KEY")
+    st.markdown("---")
+    st.markdown("""
+    <div style='font-size:12px; color:#a4b1c9;'>
+    How to add key:<br>
+    • Streamlit Cloud: go to app settings → Secrets<br>
+    • Local: create .streamlit/secrets.toml or set env var GEMINI_API_KEY<br><br>
+    Get a key: https://aistudio.google.com/apikey
+    </div>
+    """, unsafe_allow_html=True)
+
+# -----------------------
+# Floating bubble + pill + hidden toggle button
+# -----------------------
+# Visual bubble and pill
+st.markdown('<div class="chat-bubble" id="oculaire_chat_bubble">🤖</div><div class="chat-pill" id="oculaire_chat_pill">Ask Assistant</div>', unsafe_allow_html=True)
+
+# Hidden unique toggle button label (exact match required)
+_TOGGLE_LABEL = "__OCULAIRE_TOGGLE_CHAT__"
+# Render off-screen button (Streamlit still registers clicks)
+st.markdown('<div style="position:absolute; left:-9999px; top:-9999px; opacity:0;">', unsafe_allow_html=True)
+toggle_clicked = st.button(_TOGGLE_LABEL, key="__oculaire_toggle_button__")
+st.markdown("</div>", unsafe_allow_html=True)
+
+# When clicked toggle the sidebar chat state
+if toggle_clicked:
+    st.session_state.chat_open = not st.session_state.chat_open
+    # ensure input exists
+    if 'chat_input' not in st.session_state:
+        st.session_state.chat_input = ""
+    st.experimental_rerun()
+
+# JS to click the hidden button when bubble/pill are clicked
+st.markdown(f"""
+<script>
+(function(){{
+  const targetLabel = "{_TOGGLE_LABEL}";
+  function clickHidden() {{
+    // look in current doc
+    let btns = Array.from(document.querySelectorAll('button'));
+    for (let b of btns) {{
+      if ((b.innerText || "").trim() === targetLabel) {{ b.click(); return true; }}
+    }}
+    // try parent (iframe) - ignore cross-origin errors
+    try {{
+      if (window.parent && window.parent.document) {{
+        let pbtns = Array.from(window.parent.document.querySelectorAll('button'));
+        for (let b of pbtns) {{
+          if ((b.innerText || "").trim() === targetLabel) {{ b.click(); return true; }}
+        }}
+      }}
+    }} catch(e){{ /* ignore */ }}
+    console.warn("OCULAIRE: toggle button not found:", targetLabel);
+    return false;
+  }}
+
+  const bubble = document.getElementById('oculaire_chat_bubble');
+  const pill = document.getElementById('oculaire_chat_pill');
+  [bubble, pill].forEach(el => {{
+    if (!el) return;
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', function(e) {{
+      e.preventDefault();
+      el.style.transform = 'scale(0.96)';
+      setTimeout(()=> el.style.transform = '', 120);
+      clickHidden();
+    }});
+  }});
+}})();
+</script>
+""", unsafe_allow_html=True)
+
+# -----------------------
+# Main UI: Uploads, Analysis, Downloads
+# -----------------------
 left_col, right_col = st.columns([3, 1])
 with left_col:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("🩺 RNFLT Map Analysis (.npz)")
-    rnflt_file = st.file_uploader("Upload RNFLT .npz", type=["npz"], label_visibility="visible")
+    rnflt_file = st.file_uploader("Upload RNFLT .npz", type=["npz"])
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="card" style="margin-top:12px">', unsafe_allow_html=True)
     st.subheader("👁️ B-scan Slice Analysis (image)")
-    bscan_file = st.file_uploader("Upload B-scan image (jpg/png)", type=["jpg","png","jpeg"], label_visibility="visible")
+    bscan_file = st.file_uploader("Upload B-scan image (jpg/png)", type=["jpg","png","jpeg"])
     st.markdown("</div>", unsafe_allow_html=True)
 
     threshold = st.slider("Thin-zone threshold (µm)", min_value=5, max_value=50, value=10)
 
 with right_col:
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("<div class='metric-label'>Overview</div>", unsafe_allow_html=True)
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='color:#a4b1c9'>Overview</div>", unsafe_allow_html=True)
     if scaler is None:
-        st.markdown("<div class='metric-label'>RNFLT artifacts: <b style='color:#ff8a8a'>missing</b></div>", unsafe_allow_html=True)
+        st.markdown("<div style='color:#ff8a8a'>RNFLT artifacts: missing</div>", unsafe_allow_html=True)
     else:
-        st.markdown("<div class='metric-label'>RNFLT artifacts: <b style='color:#8affd6'>loaded</b></div>", unsafe_allow_html=True)
+        st.markdown("<div style='color:#8affd6'>RNFLT artifacts: loaded</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-# -----------------------
-# Analysis & plotting (kept concise)
 figs_for_report = []
 severity_overall = 0.0
 
@@ -452,21 +426,19 @@ if rnflt_file is not None:
         severity_overall = max(severity_overall, sev)
 
         c1, c2, c3, c4 = st.columns([2,2,2,1])
-        c1.markdown(f"<div class='metric-label'>Status</div><div class='large-metric'>{'🚨 ' if 'Glaucoma' in label_r else '✅ '}{label_r}</div>", unsafe_allow_html=True)
-        c2.markdown(f"<div class='metric-label'>Mean RNFLT (µm)</div><div class='large-metric'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
-        c3.markdown(f"<div class='metric-label'>Std Dev</div><div class='large-metric'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
-        c4.markdown(f"<div class='metric-label'>Cluster</div><div class='large-metric'>{cluster}</div>", unsafe_allow_html=True)
+        c1.markdown(f"<div style='color:#a4b1c9'>Status</div><div style='font-weight:800;font-size:20px'>{'🚨 ' if 'Glaucoma' in label_r else '✅ '}{label_r}</div>", unsafe_allow_html=True)
+        c2.markdown(f"<div style='color:#a4b1c9'>Mean RNFLT (µm)</div><div style='font-weight:800;font-size:20px'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
+        c3.markdown(f"<div style='color:#a4b1c9'>Std Dev</div><div style='font-weight:800;font-size:20px'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
+        c4.markdown(f"<div style='color:#a4b1c9'>Cluster</div><div style='font-weight:800;font-size:20px'>{cluster}</div>", unsafe_allow_html=True)
 
         st.markdown(render_severity_html(sev), unsafe_allow_html=True)
 
         fig, axes = plt.subplots(1,3,figsize=(15,5), constrained_layout=True)
-        im0 = axes[0].imshow(rnflt_map, cmap='turbo'); axes[0].set_title("Uploaded RNFLT"); axes[0].axis('off')
-        fig.colorbar(im0, ax=axes[0], fraction=0.05)
-        im1 = axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30); axes[1].set_title("Difference (vs Healthy)"); axes[1].axis('off')
-        fig.colorbar(im1, ax=axes[1], fraction=0.05)
-        im2 = axes[2].imshow(risk, cmap='hot'); axes[2].set_title("Risk Map (thinner zones)"); axes[2].axis('off')
-        fig.colorbar(im2, ax=axes[2], fraction=0.05)
+        im0 = axes[0].imshow(rnflt_map, cmap='turbo'); axes[0].axis('off'); axes[0].set_title("Uploaded RNFLT")
+        axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30); axes[1].axis('off'); axes[1].set_title("Difference (vs Healthy)")
+        axes[2].imshow(risk, cmap='hot'); axes[2].axis('off'); axes[2].set_title("Risk Map (thinner zones)")
         fig.patch.set_facecolor("#050612")
+        for ax in axes: ax.set_facecolor("#050612")
         st.pyplot(fig)
         figs_for_report.append(fig)
 
@@ -483,8 +455,8 @@ if bscan_file is not None and b_model is not None:
 
     st.markdown("<hr>", unsafe_allow_html=True)
     m1, m2 = st.columns(2)
-    m1.markdown(f"<div class='metric-label'>CNN Prediction</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
-    m2.markdown(f"<div class='metric-label'>Confidence</div><div class='large-metric'>{conf:.2f}%</div>", unsafe_allow_html=True)
+    m1.markdown(f"<div style='color:#a4b1c9'>CNN Prediction</div><div style='font-weight:800;font-size:20px'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
+    m2.markdown(f"<div style='color:#a4b1c9'>Confidence</div><div style='font-weight:800;font-size:20px'>{conf:.2f}%</div>", unsafe_allow_html=True)
     st.markdown(render_severity_html(conf), unsafe_allow_html=True)
 
     heat = gradcam_local(batch, b_model)
@@ -500,7 +472,7 @@ if bscan_file is not None and b_model is not None:
         fig2.patch.set_facecolor("#050612")
         figs_for_report.append(fig2)
 
-# Combined severity summary + downloads
+# Combined severity + downloads
 if (rnflt_file is not None) or (bscan_file is not None):
     st.markdown("<hr>", unsafe_allow_html=True)
     st.markdown("<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
@@ -508,50 +480,64 @@ if (rnflt_file is not None) or (bscan_file is not None):
     if figs_for_report:
         png_bytes = fig_to_png_bytes(figs_for_report[0])
         pdf_bytes = create_pdf_bytes(figs_for_report)
-        st.markdown('<div style="display:flex;gap:12px;margin-top:10px">', unsafe_allow_html=True)
-        st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
+        st.download_button("📸 Download First Figure (PNG)", data=png_bytes, file_name="oculaire_fig.png", mime="image/png")
         st.download_button("📄 Download Full Report (PDF)", data=pdf_bytes, file_name="oculaire_report.pdf", mime="application/pdf")
-        st.markdown('</div>', unsafe_allow_html=True)
 
 st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:#a4b1c9;padding:6px;'>OCULAIRE Neon Lab v5 — For research/demo use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# Sidebar chat UI when chat_open is True
+# Sidebar chat UI (renders when chat_open True)
+# -----------------------
 if st.session_state.chat_open:
     with st.sidebar:
         st.markdown("---")
-        st.markdown("<div style='font-weight:800;font-size:18px;color: #00f5ff;'>🤖 Glaucoma Assistant</div>", unsafe_allow_html=True)
-        st.markdown("<p style='color:#a4b1c9;font-size:13px;margin-bottom:10px;'>Ask me about RNFLT, OCT, B-scan or glaucoma basics. (Demo only)</p>", unsafe_allow_html=True)
+        st.markdown("<div class='chat-header'>🤖 Glaucoma Assistant</div>", unsafe_allow_html=True)
+        st.markdown("<div style='text-align:center;color:#a4b1c9;margin-bottom:8px;'>Ask me anything about glaucoma, RNFLT, or B-scans</div>", unsafe_allow_html=True)
+        st.markdown("<div style='max-height:48vh; overflow:auto; padding:6px;'>", unsafe_allow_html=True)
 
-        # show history
-        for msg in st.session_state.chat_history[-40:]:
-            if msg.get("role") == "user":
-                st.markdown(f"<div style='background: rgba(0,245,255,0.06); padding:8px; border-radius:8px; margin-bottom:6px;'><strong>You:</strong> {msg.get('content')}</div>", unsafe_allow_html=True)
+        # Show chat history
+        for msg in st.session_state.chat_history[-80:]:
+            if msg["role"] == "user":
+                st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
             else:
-                st.markdown(f"<div style='background: rgba(255,64,196,0.04); padding:8px; border-radius:8px; margin-bottom:6px;'><strong>Assistant:</strong> {msg.get('content')}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='assistant-msg'><strong>Assistant:</strong> {msg['content']}</div>", unsafe_allow_html=True)
 
-        # input bound to session_state.chat_input
-        user_q = st.text_input("Your question:", key="chat_input", placeholder="e.g., What is RNFLT?")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        c1, c2, c3 = st.columns([3,1,1])
-        with c1:
+        # Input (bound to session_state.chat_input)
+        q = st.text_input("Your question:", key="chat_input", placeholder="e.g., What is RNFLT?")
+
+        col1, col2, col3 = st.columns([3,1,1])
+        with col1:
             if st.button("📤 Send", use_container_width=True):
-                if user_q:
-                    # call assistant
-                    with st.spinner("Thinking..."):
-                        resp = ask_glaucoma_assistant(user_q, st.session_state.chat_history, API_KEY)
-                    st.session_state.chat_history.append({"role":"user","content":user_q})
-                    st.session_state.chat_history.append({"role":"assistant","content":resp})
+                qq = st.session_state.chat_input.strip()
+                if not qq:
+                    st.warning("Type a question first.")
+                else:
+                    # local fallback if no key
+                    append_user = lambda s: st.session_state.chat_history.append({"role":"user","content":s})
+                    append_assistant = lambda s: st.session_state.chat_history.append({"role":"assistant","content":s})
+                    if not API_KEY:
+                        append_user(qq)
+                        append_assistant("⚠️ No API key configured. Please add GEMINI_API_KEY to Streamlit secrets or environment.")
+                        st.session_state.chat_input = ""
+                        st.experimental_rerun()
+
+                    append_user(qq)
+                    with st.spinner("🔍 Thinking..."):
+                        reply = ask_glaucoma_assistant(qq, st.session_state.chat_history, API_KEY)
+                    append_assistant(reply)
                     st.session_state.chat_input = ""
                     st.experimental_rerun()
-        with c2:
+
+        with col2:
             if st.button("🗑️", use_container_width=True):
                 st.session_state.chat_history = []
                 st.experimental_rerun()
-        with c3:
+        with col3:
             if st.button("✖️", use_container_width=True):
                 st.session_state.chat_open = False
                 st.experimental_rerun()
 
-# End of file
+# End of app.py
