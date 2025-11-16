@@ -1,34 +1,23 @@
-# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (full file)
-# Notes:
-# - Paste this file into your Streamlit app directory and run `streamlit run app.py`.
-# - Set GEMINI_API_KEY in Streamlit secrets or environment to enable real AI responses.
-# - If the google.generativeai SDK isn't installed the REST fallback will be used.
-# - MODEL_NAME is used for SDK/REST calls.
-
-import os
-import io
-import time
-import json
-import base64
-import joblib
+# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (query-param toggle)
+import streamlit as st
 import numpy as np
-import matplotlib.pyplot as plt
+import joblib
 import tensorflow as tf
+import matplotlib.pyplot as plt
 from PIL import Image
 import cv2
+import io
 from matplotlib.backends.backend_pdf import PdfPages
-import streamlit as st
+import os
 
-# Try to import google.generativeai; otherwise we'll use requests for REST fallback
+# Try to import google.generativeai, fallback to requests
 try:
     import google.generativeai as genai
     USE_SDK = True
-except Exception:
+except ImportError:
     import requests
+    import json
     USE_SDK = False
-
-# Model name for Gemini / REST
-MODEL_NAME = "models/gemini-2.5-pro"
 
 # -----------------------
 # Page Config
@@ -38,7 +27,7 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    page_icon="👁️")
 
 # -----------------------
-# Session state defaults (prevent AttributeError)
+# Initialize Session State for Chat (prevent AttributeError)
 # -----------------------
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
@@ -47,26 +36,29 @@ if 'chat_open' not in st.session_state:
 if 'chat_input' not in st.session_state:
     st.session_state.chat_input = ""
 
-# -----------------------
-# Helper: get API key
-# Priority: Streamlit secrets > env var
-# -----------------------
+# --- Query param chat toggle (stable method) ---
+params = st.experimental_get_query_params()
+if "open_chat" in params:
+    st.session_state.chat_open = True
+    # clear param so subsequent clicks work
+    st.experimental_set_query_params()
+
+# Get API key from Streamlit secrets or environment variable
+# Priority: Streamlit secrets > Environment variable > User input
 def get_api_key():
     try:
-        # support both top-level and nested key names
-        if "GEMINI_API_KEY" in st.secrets:
-            return st.secrets["GEMINI_API_KEY"]
-        if "gemini" in st.secrets and "api_key" in st.secrets["gemini"]:
-            return st.secrets["gemini"]["api_key"]
+        return st.secrets["GEMINI_API_KEY"]
     except Exception:
         pass
-    # environment fallback
-    return os.environ.get("GEMINI_API_KEY") or os.environ.get("GENAI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or None
+    env_key = os.getenv("GEMINI_API_KEY")
+    if env_key:
+        return env_key
+    return None
 
 API_KEY = get_api_key()
 
 # -----------------------
-# Plot styling (neon)
+# Neon Matplotlib Config
 # -----------------------
 plt.style.use('dark_background')
 plt.rcParams.update({
@@ -82,7 +74,7 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS (neon theme + floating chat)
+# CSS — Neon Theme + Animations
 # -----------------------
 st.markdown("""
 <style>
@@ -93,35 +85,186 @@ st.markdown("""
   --neonB:#ff40c4;
   --muted:#a4b1c9;
 }
-.stApp { background: radial-gradient(circle at 20% 20%, #091133, #020208 90%); color: #e6faff; font-family: 'Plus Jakarta Sans', Inter, system-ui; }
-.header { text-align:center; margin-top:8px; margin-bottom:6px; }
-.header h1 { font-size:42px; font-weight:900; letter-spacing:3px; background: linear-gradient(90deg, var(--neonA), var(--neonB)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-shadow: 0 0 20px rgba(0,245,255,0.7), 0 0 35px rgba(255,64,196,0.4); }
-.header h3 { color:var(--muted); font-weight:400; font-size:14px; }
+.stApp {
+  background: radial-gradient(circle at 20% 20%, #091133, #020208 90%);
+  color: #e6faff;
+  font-family: 'Plus Jakarta Sans', Inter, system-ui;
+}
+.header { text-align:center; margin-top:10px; margin-bottom:10px; }
+.header h1 {
+  font-size:42px; font-weight:900; letter-spacing:3px;
+  background: linear-gradient(90deg, var(--neonA), var(--neonB));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  text-shadow: 0 0 20px rgba(0,245,255,0.8), 0 0 35px rgba(255,64,196,0.5);
+}
+.header h3 { color:var(--muted); font-weight:400; font-size:15px; text-shadow: 0 0 12px rgba(255,255,255,0.2); }
+.card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  border:1px solid rgba(255,255,255,0.05);
+  box-shadow: 0 0 25px rgba(0,245,255,0.05), 0 0 35px rgba(255,64,196,0.05);
+  border-radius:12px; padding:16px;
+}
+.metric-label { color:var(--muted); font-size:12px; }
+.large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.5); }
 
-/* Cards */
-.card { background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); border:1px solid rgba(255,255,255,0.04); box-shadow: 0 0 25px rgba(0,245,255,0.04); border-radius:12px; padding:14px; }
+/* Severity Bar */
+.sev-wrap { margin-top:16px; }
+.sev-outer { height:18px; width:100%; background: rgba(255,255,255,0.05); border-radius:14px; overflow:hidden; }
+.sev-inner {
+  height:100%; width:0%;
+  background: linear-gradient(90deg,var(--neonA),var(--neonB));
+  border-radius:14px;
+  box-shadow: 0 0 25px rgba(0,245,255,0.6), 0 0 25px rgba(255,64,196,0.5);
+  transition: width 1s ease-in-out;
+}
+.sev-chip {
+  margin-top:6px; display:inline-block;
+  padding:6px 12px; border-radius:12px;
+  font-weight:800; font-size:14px; color:#021617;
+  background: linear-gradient(90deg, rgba(0,245,255,0.9), rgba(255,64,196,0.9));
+  box-shadow: 0 0 20px rgba(0,245,255,0.4), 0 0 20px rgba(255,64,196,0.3);
+  animation: pulse 1.8s infinite;
+}
+@keyframes pulse { 0%{transform:scale(1);} 50%{transform:scale(1.06);} 100%{transform:scale(1);} }
+.download-btns { margin-top:14px; display:flex; gap:10px; justify-content:center; }
 
-/* Severity bar */
-.sev-wrap { margin-top:12px; }
-.sev-outer { height:18px; width:100%; background: rgba(255,255,255,0.04); border-radius:14px; overflow:hidden; }
-.sev-inner { height:100%; width:0%; background: linear-gradient(90deg,var(--neonA),var(--neonB)); border-radius:14px; box-shadow: 0 0 25px rgba(0,245,255,0.55); transition: width 1s cubic-bezier(.2,.9,.2,1); }
-.sev-chip { margin-top:8px; display:inline-block; padding:6px 12px; border-radius:12px; font-weight:800; font-size:14px; color:#021617; background: linear-gradient(90deg, rgba(0,245,255,0.95), rgba(255,64,196,0.95)); box-shadow: 0 0 20px rgba(0,245,255,0.3); animation: pulse 1.6s infinite; }
-@keyframes pulse { 0%{transform:scale(1);} 50%{transform:scale(1.05);} 100%{transform:scale(1);} }
+/* Chat message styling */
+.user-msg {
+  background: linear-gradient(135deg, rgba(0,245,255,0.15), rgba(0,245,255,0.05));
+  border-left: 3px solid var(--neonA);
+  padding: 12px;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.assistant-msg {
+  background: linear-gradient(135deg, rgba(255,64,196,0.15), rgba(255,64,196,0.05));
+  border-left: 3px solid var(--neonB);
+  padding: 12px;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.chat-header {
+  text-align: center;
+  background: linear-gradient(90deg, var(--neonA), var(--neonB));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+  font-size: 24px;
+  margin-bottom: 20px;
+  text-shadow: 0 0 20px rgba(0,245,255,0.3);
+}
 
-/* Floating bubble/pill */
-.chat-bubble { position: fixed; bottom: 30px; right: 30px; width:64px; height:64px; border-radius:50%; background: linear-gradient(135deg,#00f5ff,#ff40c4); display:flex; align-items:center; justify-content:center; font-size:28px; cursor:pointer; z-index:9999; box-shadow:0 12px 40px rgba(0,0,0,0.6); }
-.chat-pill { position: fixed; bottom: 36px; right: 110px; background: linear-gradient(135deg, rgba(0,245,255,0.08), rgba(255,64,196,0.06)); padding:12px 18px; border-radius:30px; color:#e6faff; font-weight:800; cursor:pointer; z-index:9999; box-shadow:0 8px 40px rgba(0,0,0,0.45); }
+/* Floating Chat Bubble */
+.chat-bubble {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--neonA), var(--neonB));
+  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  z-index: 9999;
+  animation: float 3s ease-in-out infinite, glow 2s ease-in-out infinite;
+  transition: transform 0.3s ease;
+}
+.chat-bubble:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 40px rgba(0,245,255,0.8), 0 0 50px rgba(255,64,196,0.7);
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5); }
+  50% { box-shadow: 0 0 40px rgba(0,245,255,0.9), 0 0 60px rgba(255,64,196,0.8); }
+}
 
-/* Sidebar chat header */
-.chat-header { text-align:center; font-weight:800; color:#e6faff; }
-
-/* Chat message styles */
-.user-msg { background: linear-gradient(135deg, rgba(0,245,255,0.08), rgba(0,245,255,0.02)); padding:8px; border-radius:8px; margin:6px 0; }
-.assistant-msg { background: linear-gradient(135deg, rgba(255,64,196,0.06), rgba(255,64,196,0.02)); padding:8px; border-radius:8px; margin:6px 0; }
+/* Floating Chat Pill (text) */
+.floating-chat-pill {
+  position: fixed;
+  bottom: 36px;
+  right: 110px;
+  z-index: 9999;
+  background: linear-gradient(135deg, rgba(0,245,255,0.08), rgba(255,64,196,0.06));
+  padding: 12px 18px;
+  border-radius: 30px;
+  color: #e6faff;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+  transition: transform 0.12s ease;
+}
+.floating-chat-pill:hover { transform: translateY(-4px); }
 
 footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
+
+# -----------------------
+# Chatbot Function
+# -----------------------
+def ask_glaucoma_assistant(question, history, api_key):
+    """Call Google Gemini API with glaucoma-specific context"""
+    if not api_key or not api_key.strip():
+        return "⚠️ Please configure your Google Gemini API key (see sidebar)."
+
+    system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
+
+Your role:
+- Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment
+- Provide accurate, evidence-based information about glaucoma
+- Explain medical terminology clearly
+- If asked about non-glaucoma topics, politely redirect to glaucoma-related questions
+- Keep responses concise and under 200 words
+- Always include a brief disclaimer that you're providing educational information, not medical advice
+
+Important: Always remind users to consult healthcare professionals for medical decisions."""
+
+    try:
+        if USE_SDK:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            chat_history = []
+            for msg in history[-6:]:
+                role = "user" if msg["role"] == "user" else "model"
+                chat_history.append({"role": role, "parts": [msg["content"]]})
+            chat = model.start_chat(history=chat_history)
+            response = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
+            return response.text
+        else:
+            conversation_context = ""
+            for msg in history[-6:]:
+                role = "User" if msg["role"] == "user" else "Assistant"
+                conversation_context += f"{role}: {msg['content']}\n\n"
+            full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
+            response = requests.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [{"parts": [{"text": full_prompt}]}],
+                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1000}
+                },
+                timeout=30
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            elif response.status_code == 403:
+                return "🔑 API key invalid. Get a new key at https://aistudio.google.com/apikey"
+            elif response.status_code == 404:
+                return "❌ API not accessible. Your key might be restricted. Try creating a new unrestricted key."
+            else:
+                return f"❌ Error ({response.status_code}): {response.text[:200]}"
+    except Exception as e:
+        return f"❌ Error: {str(e)}\n\nTip: Make sure your API key from https://aistudio.google.com/apikey is unrestricted."
 
 # -----------------------
 # Header
@@ -135,11 +278,10 @@ st.markdown("""
 st.markdown("---")
 
 # -----------------------
-# Load models & artifacts (cached)
+# Load Models
 # -----------------------
 @st.cache_resource
-def load_models_and_artifacts():
-    # B-scan CNN (optional)
+def load_models():
     try:
         b_model = tf.keras.models.load_model("bscan_cnn.h5", compile=False)
     except Exception:
@@ -154,38 +296,36 @@ def load_models_and_artifacts():
         scaler = kmeans = avg_healthy = avg_glaucoma = thin_cluster = None
     return b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster
 
-b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models_and_artifacts()
+b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models()
 
 # -----------------------
-# Helpers (RNFLT/B-scan + plotting)
+# Helpers
 # -----------------------
-def process_npz_file(f):
+def process_npz(f):
     try:
         buf = io.BytesIO(f.getvalue())
-        arrs = np.load(buf, allow_pickle=True)
-        key = "volume" if "volume" in arrs else arrs.files[0]
-        arr = arrs[key]
+        data = np.load(buf, allow_pickle=True)
+        arr = data["volume"] if "volume" in data else data[data.files[0]]
         if arr.ndim == 3:
             arr = arr[0, :, :]
         vals = arr.flatten().astype(float)
-        metrics = {"mean": float(np.nanmean(vals)), "std": float(np.nanstd(vals)),
-                   "min": float(np.nanmin(vals)), "max": float(np.nanmax(vals))}
-        return arr, metrics
+        m = {"mean": np.nanmean(vals), "std": np.nanstd(vals), "min": np.nanmin(vals), "max": np.nanmax(vals)}
+        return arr, m
     except Exception as e:
-        st.error(f"Could not read .npz: {e}")
+        st.error(f"Error reading NPZ: {e}")
         return None, None
 
-def compute_risk_map_local(rnflt_map, avg_map, threshold=-10):
-    if rnflt_map.shape != avg_map.shape:
-        avg_map = cv2.resize(avg_map, (rnflt_map.shape[1], rnflt_map.shape[0]))
-    diff = rnflt_map - avg_map
+def compute_risk_map(rnflt, healthy, threshold=-10):
+    if rnflt.shape != healthy.shape:
+        healthy = cv2.resize(healthy, (rnflt.shape[1], rnflt.shape[0]))
+    diff = rnflt - healthy
     risk = np.where(diff < threshold, diff, np.nan)
     total = np.isfinite(diff).sum()
     risky = np.isfinite(risk).sum()
-    severity = (risky / total) * 100 if total > 0 else 0.0
+    severity = (risky / total) * 100 if total else 0
     return diff, risk, severity
 
-def preprocess_bscan_image(image_pil, size=(224,224)):
+def preprocess_bscan(image_pil, size=(224,224)):
     arr = np.array(image_pil.convert('L'))
     arr = np.clip(arr, 0, np.percentile(arr, 99))
     arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-6)
@@ -194,14 +334,14 @@ def preprocess_bscan_image(image_pil, size=(224,224)):
     batch = np.expand_dims(arr_rgb, axis=0).astype(np.float32)
     return batch, arr_res
 
-def gradcam_local(batch, model):
+def gradcam(batch, model):
     try:
         last_conv = None
         for layer in reversed(model.layers):
             if isinstance(layer, (tf.keras.layers.Conv2D, tf.keras.layers.DepthwiseConv2D)):
                 last_conv = layer.name
                 break
-        if last_conv is None:
+        if not last_conv:
             return None
         grad_model = tf.keras.models.Model(model.inputs, [model.get_layer(last_conv).output, model.output])
         with tf.GradientTape() as tape:
@@ -217,320 +357,224 @@ def gradcam_local(batch, model):
     except Exception:
         return None
 
-def fig_to_png_bytes(fig):
+def fig_to_png(fig):
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches='tight', facecolor=fig.get_facecolor())
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor=fig.get_facecolor())
     buf.seek(0)
     return buf.getvalue()
 
-def create_pdf_bytes(figs):
+def create_pdf(figs):
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
         for f in figs:
-            pdf.savefig(f, bbox_inches='tight', facecolor=f.get_facecolor())
+            pdf.savefig(f, bbox_inches="tight", facecolor=f.get_facecolor())
     buf.seek(0)
     return buf.getvalue()
 
-def render_severity_html(pct):
-    pct = float(max(0.0, min(100.0, pct)))
+def render_severity(pct):
+    pct = max(0.0, min(100.0, float(pct)))
     html = f"""
     <div class='sev-wrap'>
-      <div class='sev-outer'><div id='sev_inner' class='sev-inner' style='width:0%'></div></div>
+      <div class='sev-outer'><div id='sev_inner' class='sev-inner'></div></div>
       <div style='text-align:center'><div class='sev-chip'>{pct:.1f}%</div></div>
     </div>
     <script>
       setTimeout(function(){{
-        var el = document.getElementById('sev_inner');
-        if(el) el.style.width = '{pct:.1f}%';
-      }}, 120);
+        var el=document.getElementById('sev_inner');
+        if(el) el.style.width='{pct:.1f}%';
+      }},150);
     </script>
     """
     return html
 
 # -----------------------
-# Chat assistant backend (SDK or REST fallback)
-# -----------------------
-def ask_glaucoma_assistant(question, history, api_key):
-    """Call Gemini (SDK if available else REST). Returns string reply."""
-    if not api_key:
-        return "⚠️ No Gemini API key configured. Add GEMINI_API_KEY in Streamlit secrets or environment."
-
-    system_instruction = (
-        "You are a specialized medical assistant focused exclusively on glaucoma. "
-        "Answer only glaucoma/OCT/RNFLT related questions. Keep responses concise, include brief disclaimer 'educational only'."
-    )
-
-    # Use recent history for context
-    try:
-        recent = history[-6:]
-    except Exception:
-        recent = []
-
-    if USE_SDK:
-        try:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(MODEL_NAME)
-            chat_history = []
-            for msg in recent:
-                role = "user" if msg["role"] == "user" else "model"
-                chat_history.append({"role": role, "parts": [msg["content"]]})
-            chat = model.start_chat(history=chat_history)
-            response = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
-            return getattr(response, "text", str(response))
-        except Exception as e:
-            return f"⚠️ SDK error: {e}"
-    else:
-        # REST fallback (Generative Language API)
-        try:
-            conversation_context = ""
-            for msg in recent:
-                role = "User" if msg["role"] == "user" else "Assistant"
-                conversation_context += f"{role}: {msg['content']}\n\n"
-            full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
-            # Use v1beta generativelanguage endpoint (model name path differs by product; this example uses generative endpoint)
-            url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
-            payload = {
-                "contents": [{"parts": [{"text": full_prompt}]}],
-                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 400}
-            }
-            resp = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=20)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-            elif resp.status_code == 403:
-                return "🔑 API key invalid or restricted (403)."
-            else:
-                return f"⚠️ REST error ({resp.status_code}): {resp.text[:200]}"
-        except Exception as e:
-            return f"⚠️ REST call error: {e}"
-
-# -----------------------
-# Sidebar: API key status & instructions
+# SIDEBAR - API Key Status
 # -----------------------
 with st.sidebar:
-    st.markdown("<div style='font-weight:800; color:#e6faff; text-align:center;'>🔑 API Status</div>", unsafe_allow_html=True)
+    st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
     if API_KEY:
         st.success("✅ Gemini API Key configured")
-        st.info("Key loaded from secrets/environment")
+        st.info("Using API key from secrets/environment")
     else:
         st.error("❌ No API Key found")
-        st.warning("Chatbot will use local fallback until you add GEMINI_API_KEY")
+        st.warning("Chatbot will not work without an API key")
     st.markdown("---")
     st.markdown("""
-    <div style='font-size:12px; color:#a4b1c9;'>
-    How to add key:<br>
-    • Streamlit Cloud: go to app settings → Secrets<br>
-    • Local: create .streamlit/secrets.toml or set env var GEMINI_API_KEY<br><br>
-    Get a key: https://aistudio.google.com/apikey
+    <div style='font-size:12px; color:var(--muted);'>
+    <strong>How to configure Gemini API key:</strong><br><br>
+    <strong>For Streamlit Cloud:</strong><br>
+    1. Go to your app settings<br>
+    2. Add to Secrets:<br>
+    <code>GEMINI_API_KEY = "your-key-here"</code><br><br>
+    <strong>For Local Development:</strong><br>
+    1. Create <code>.streamlit/secrets.toml</code><br>
+    2. Add: <code>GEMINI_API_KEY = "your-key-here"</code><br>
+    3. Or set environment variable:<br>
+    <code>export GEMINI_API_KEY="your-key-here"</code><br><br>
+    <strong>Get FREE API key:</strong><br>
+    1. Visit <a href='https://aistudio.google.com/apikey' target='_blank'>Google AI Studio</a><br>
+    2. Click "Get API Key"<br>
+    3. Copy your key<br><br>
+    <strong>✨ Gemini is FREE with generous limits!</strong>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------
-# Floating bubble + pill + hidden toggle button
+# FLOATING CHAT WIDGET (Bottom-right corner)
 # -----------------------
-# Visual bubble and pill
-st.markdown('<div class="chat-bubble" id="oculaire_chat_bubble">🤖</div><div class="chat-pill" id="oculaire_chat_pill">Ask Assistant</div>', unsafe_allow_html=True)
+st.markdown('<div class="chat-bubble" id="chatBubble">🤖</div><div class="floating-chat-pill" id="chatPill">Ask Assistant</div>', unsafe_allow_html=True)
 
-# Hidden unique toggle button label (exact match required)
-_TOGGLE_LABEL = "__OCULAIRE_TOGGLE_CHAT__"
-# Render off-screen button (Streamlit still registers clicks)
-st.markdown('<div style="position:absolute; left:-9999px; top:-9999px; opacity:0;">', unsafe_allow_html=True)
-toggle_clicked = st.button(_TOGGLE_LABEL, key="__oculaire_toggle_button__")
-st.markdown("</div>", unsafe_allow_html=True)
-
-# When clicked toggle the sidebar chat state
-if toggle_clicked:
-    st.session_state.chat_open = not st.session_state.chat_open
-    # ensure input exists
-    if 'chat_input' not in st.session_state:
-        st.session_state.chat_input = ""
-    st.experimental_rerun()
-
-# JS to click the hidden button when bubble/pill are clicked
-st.markdown(f"""
+# New JS: set URL param open_chat=1 and reload — stable toggle across environments
+st.markdown("""
 <script>
-(function(){{
-  const targetLabel = "{_TOGGLE_LABEL}";
-  function clickHidden() {{
-    // look in current doc
-    let btns = Array.from(document.querySelectorAll('button'));
-    for (let b of btns) {{
-      if ((b.innerText || "").trim() === targetLabel) {{ b.click(); return true; }}
-    }}
-    // try parent (iframe) - ignore cross-origin errors
-    try {{
-      if (window.parent && window.parent.document) {{
-        let pbtns = Array.from(window.parent.document.querySelectorAll('button'));
-        for (let b of pbtns) {{
-          if ((b.innerText || "").trim() === targetLabel) {{ b.click(); return true; }}
-        }}
-      }}
-    }} catch(e){{ /* ignore */ }}
-    console.warn("OCULAIRE: toggle button not found:", targetLabel);
-    return false;
-  }}
-
-  const bubble = document.getElementById('oculaire_chat_bubble');
-  const pill = document.getElementById('oculaire_chat_pill');
-  [bubble, pill].forEach(el => {{
-    if (!el) return;
-    el.style.cursor = 'pointer';
-    el.addEventListener('click', function(e) {{
-      e.preventDefault();
-      el.style.transform = 'scale(0.96)';
-      setTimeout(()=> el.style.transform = '', 120);
-      clickHidden();
-    }});
-  }});
-}})();
+(function(){
+  function openChat() {
+      try {
+          const url = new URL(window.location.href);
+          url.searchParams.set("open_chat", "1");
+          // navigate to the new URL (reloads the app with param)
+          window.location.href = url.toString();
+      } catch (e) {
+          console.error("Chat open failed:", e);
+      }
+  }
+  const bubble = document.getElementById('chatBubble');
+  const pill   = document.getElementById('chatPill');
+  [bubble, pill].forEach(el => {
+      if (!el) return;
+      el.style.cursor = "pointer";
+      el.addEventListener("click", function(){
+          el.style.transform = "scale(0.95)";
+          setTimeout(()=> el.style.transform = "", 150);
+          openChat();
+      });
+  });
+})();
 </script>
 """, unsafe_allow_html=True)
 
 # -----------------------
-# Main UI: Uploads, Analysis, Downloads
+# LAYOUT (uploads etc.)
 # -----------------------
-left_col, right_col = st.columns([3, 1])
-with left_col:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
+colA, colB = st.columns(2)
+with colA:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("🩺 RNFLT Map Analysis (.npz)")
-    rnflt_file = st.file_uploader("Upload RNFLT .npz", type=["npz"])
+    rnflt_file = st.file_uploader("Upload RNFLT file", type=["npz"])
+    st.markdown("</div>", unsafe_allow_html=True)
+with colB:
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("👁️ B-Scan Slice Analysis (Image)")
+    bscan_file = st.file_uploader("Upload B-Scan Image", type=["jpg","png","jpeg"])
     st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="card" style="margin-top:12px">', unsafe_allow_html=True)
-    st.subheader("👁️ B-scan Slice Analysis (image)")
-    bscan_file = st.file_uploader("Upload B-scan image (jpg/png)", type=["jpg","png","jpeg"])
-    st.markdown("</div>", unsafe_allow_html=True)
+threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
-    threshold = st.slider("Thin-zone threshold (µm)", min_value=5, max_value=50, value=10)
-
-with right_col:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("<div style='color:#a4b1c9'>Overview</div>", unsafe_allow_html=True)
-    if scaler is None:
-        st.markdown("<div style='color:#ff8a8a'>RNFLT artifacts: missing</div>", unsafe_allow_html=True)
-    else:
-        st.markdown("<div style='color:#8affd6'>RNFLT artifacts: loaded</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-figs_for_report = []
-severity_overall = 0.0
-
-if rnflt_file is not None:
-    rnflt_map, metrics = process_npz_file(rnflt_file)
-    if rnflt_map is not None and avg_healthy is not None and scaler is not None:
-        X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
-        Xs = scaler.transform(X)
-        cluster = int(kmeans.predict(Xs)[0]) if kmeans is not None else -1
-        label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
-        diff, risk, sev = compute_risk_map_local(rnflt_map, avg_healthy, threshold=-threshold)
-        severity_overall = max(severity_overall, sev)
-
-        c1, c2, c3, c4 = st.columns([2,2,2,1])
-        c1.markdown(f"<div style='color:#a4b1c9'>Status</div><div style='font-weight:800;font-size:20px'>{'🚨 ' if 'Glaucoma' in label_r else '✅ '}{label_r}</div>", unsafe_allow_html=True)
-        c2.markdown(f"<div style='color:#a4b1c9'>Mean RNFLT (µm)</div><div style='font-weight:800;font-size:20px'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
-        c3.markdown(f"<div style='color:#a4b1c9'>Std Dev</div><div style='font-weight:800;font-size:20px'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
-        c4.markdown(f"<div style='color:#a4b1c9'>Cluster</div><div style='font-weight:800;font-size:20px'>{cluster}</div>", unsafe_allow_html=True)
-
-        st.markdown(render_severity_html(sev), unsafe_allow_html=True)
-
-        fig, axes = plt.subplots(1,3,figsize=(15,5), constrained_layout=True)
-        im0 = axes[0].imshow(rnflt_map, cmap='turbo'); axes[0].axis('off'); axes[0].set_title("Uploaded RNFLT")
-        axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30); axes[1].axis('off'); axes[1].set_title("Difference (vs Healthy)")
-        axes[2].imshow(risk, cmap='hot'); axes[2].axis('off'); axes[2].set_title("Risk Map (thinner zones)")
-        fig.patch.set_facecolor("#050612")
-        for ax in axes: ax.set_facecolor("#050612")
-        st.pyplot(fig)
-        figs_for_report.append(fig)
-
-if bscan_file is not None and b_model is not None:
-    image_pil = Image.open(bscan_file).convert("L")
-    batch, proc = preprocess_bscan_image(image_pil)
-    try:
-        pred_raw = float(b_model.predict(batch, verbose=0)[0][0])
-    except Exception:
-        pred_raw = 0.0
-    label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
-    conf = pred_raw*100 if label_b == "Glaucoma-like" else (1 - pred_raw)*100
-    severity_overall = max(severity_overall, conf)
-
+# -----------------------
+# ANALYSIS (same as before)
+# -----------------------
+if rnflt_file or bscan_file:
+    figs = []
+    severity_overall = 0
     st.markdown("<hr>", unsafe_allow_html=True)
-    m1, m2 = st.columns(2)
-    m1.markdown(f"<div style='color:#a4b1c9'>CNN Prediction</div><div style='font-weight:800;font-size:20px'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
-    m2.markdown(f"<div style='color:#a4b1c9'>Confidence</div><div style='font-weight:800;font-size:20px'>{conf:.2f}%</div>", unsafe_allow_html=True)
-    st.markdown(render_severity_html(conf), unsafe_allow_html=True)
 
-    heat = gradcam_local(batch, b_model)
-    if heat is not None:
-        heat_r = cv2.resize(heat, (224,224))
-        hm = (heat_r * 255).astype(np.uint8)
-        hm_color = cv2.applyColorMap(hm, cv2.COLORMAP_JET)
-        overlay = (np.stack([proc]*3, axis=-1) * 255).astype(np.uint8)
-        overlay = cv2.addWeighted(overlay, 0.6, hm_color, 0.4, 0)
-        st.image([image_pil, overlay], caption=["Original B-scan", "Grad-CAM Overlay"], use_column_width=True)
-        fig2, ax2 = plt.subplots(1,2,figsize=(8,4)); ax2[0].imshow(image_pil, cmap='gray'); ax2[0].axis('off'); ax2[0].set_title("Original")
-        ax2[1].imshow(overlay); ax2[1].axis('off'); ax2[1].set_title("Grad-CAM Overlay")
-        fig2.patch.set_facecolor("#050612")
-        figs_for_report.append(fig2)
+    # RNFLT Processing
+    if rnflt_file and scaler is not None:
+        rnflt, metrics = process_npz(rnflt_file)
+        if rnflt is not None:
+            X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
+            Xs = scaler.transform(X)
+            cluster = int(kmeans.predict(Xs)[0])
+            label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
+            diff, risk, sev = compute_risk_map(rnflt, avg_healthy, -threshold)
+            severity_overall = max(severity_overall, sev)
+            m1, m2, m3, m4 = st.columns([2,2,2,2])
+            m1.markdown(f"<div class='metric-label'>Status</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_r else '✅'} {label_r}</div>", unsafe_allow_html=True)
+            m2.markdown(f"<div class='metric-label'>Mean RNFLT</div><div class='large-metric'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
+            m3.markdown(f"<div class='metric-label'>Std Dev</div><div class='large-metric'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
+            m4.markdown(f"<div class='metric-label'>Cluster</div><div class='large-metric'>{cluster}</div>", unsafe_allow_html=True)
 
-# Combined severity + downloads
-if (rnflt_file is not None) or (bscan_file is not None):
+            st.markdown(render_severity(sev), unsafe_allow_html=True)
+            fig, axes = plt.subplots(1,3,figsize=(18,6),constrained_layout=True)
+            im0=axes[0].imshow(rnflt,cmap='turbo');axes[0].axis('off');axes[0].set_title("Uploaded RNFLT")
+            plt.colorbar(im0,ax=axes[0],shrink=0.85)
+            im1=axes[1].imshow(diff,cmap='bwr',vmin=-30,vmax=30);axes[1].axis('off');axes[1].set_title("Difference (vs Healthy)")
+            plt.colorbar(im1,ax=axes[1],shrink=0.85)
+            im2=axes[2].imshow(risk,cmap='hot');axes[2].axis('off');axes[2].set_title("Risk Map")
+            plt.colorbar(im2,ax=axes[2],shrink=0.85)
+            fig.patch.set_facecolor("#050612")
+            st.pyplot(fig)
+            figs.append(fig)
+
+    # B-Scan Processing
+    if bscan_file and b_model is not None:
+        image_pil = Image.open(bscan_file).convert("L")
+        batch, proc = preprocess_bscan(image_pil)
+        pred_raw = b_model.predict(batch, verbose=0)[0][0]
+        label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
+        conf = pred_raw*100 if label_b=="Glaucoma-like" else (1-pred_raw)*100
+        severity_overall = max(severity_overall, conf)
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+        m1, m2 = st.columns(2)
+        m1.markdown(f"<div class='metric-label'>CNN Prediction</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
+        m2.markdown(f"<div class='metric-label'>Confidence</div><div class='large-metric'>{conf:.2f}%</div>", unsafe_allow_html=True)
+        st.markdown(render_severity(conf), unsafe_allow_html=True)
+
+        heat = gradcam(batch, b_model)
+        if heat is not None:
+            heat_r = cv2.resize(heat, (224,224))
+            hm = (heat_r * 255).astype(np.uint8)
+            hm_color = cv2.applyColorMap(hm, cv2.COLORMAP_JET)
+            overlay = (np.stack([proc]*3, axis=-1)*255).astype(np.uint8)
+            overlay = cv2.addWeighted(overlay, 0.6, hm_color, 0.4, 0)
+            st.image([image_pil, overlay], caption=["Original B-Scan", "Grad-CAM Overlay"], use_column_width=True)
+
+    # Combined Severity Summary
     st.markdown("<hr>", unsafe_allow_html=True)
-    st.markdown("<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
-    st.markdown(render_severity_html(severity_overall), unsafe_allow_html=True)
-    if figs_for_report:
-        png_bytes = fig_to_png_bytes(figs_for_report[0])
-        pdf_bytes = create_pdf_bytes(figs_for_report)
-        st.download_button("📸 Download First Figure (PNG)", data=png_bytes, file_name="oculaire_fig.png", mime="image/png")
+    st.markdown(f"<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
+    st.markdown(render_severity(severity_overall), unsafe_allow_html=True)
+
+    # Download buttons
+    if figs:
+        png_bytes = fig_to_png(figs[0])
+        pdf_bytes = create_pdf(figs)
+        st.markdown("<div class='download-btns'>", unsafe_allow_html=True)
+        st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
         st.download_button("📄 Download Full Report (PDF)", data=pdf_bytes, file_name="oculaire_report.pdf", mime="application/pdf")
+        st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center;color:#a4b1c9;padding:6px;'>OCULAIRE Neon Lab v5 — For research/demo use only</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# Sidebar chat UI (renders when chat_open True)
+# When chat is open, show in sidebar
 # -----------------------
 if st.session_state.chat_open:
     with st.sidebar:
         st.markdown("---")
         st.markdown("<div class='chat-header'>🤖 Glaucoma Assistant</div>", unsafe_allow_html=True)
-        st.markdown("<div style='text-align:center;color:#a4b1c9;margin-bottom:8px;'>Ask me anything about glaucoma, RNFLT, or B-scans</div>", unsafe_allow_html=True)
-        st.markdown("<div style='max-height:48vh; overflow:auto; padding:6px;'>", unsafe_allow_html=True)
-
-        # Show chat history
-        for msg in st.session_state.chat_history[-80:]:
+        st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:15px;'>Ask me anything about glaucoma!</p>", unsafe_allow_html=True)
+        # Display chat history
+        for msg in st.session_state.chat_history:
             if msg["role"] == "user":
                 st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
             else:
-                st.markdown(f"<div class='assistant-msg'><strong>Assistant:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # Input (bound to session_state.chat_input)
-        q = st.text_input("Your question:", key="chat_input", placeholder="e.g., What is RNFLT?")
-
-        col1, col2, col3 = st.columns([3,1,1])
+                st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+        # Input area bound to session_state.chat_input
+        user_question = st.text_input("Your question:", key="chat_input", placeholder="What is glaucoma?")
+        col1, col2, col3 = st.columns([3, 1, 1])
         with col1:
             if st.button("📤 Send", use_container_width=True):
-                qq = st.session_state.chat_input.strip()
-                if not qq:
-                    st.warning("Type a question first.")
-                else:
-                    # local fallback if no key
-                    append_user = lambda s: st.session_state.chat_history.append({"role":"user","content":s})
-                    append_assistant = lambda s: st.session_state.chat_history.append({"role":"assistant","content":s})
-                    if not API_KEY:
-                        append_user(qq)
-                        append_assistant("⚠️ No API key configured. Please add GEMINI_API_KEY to Streamlit secrets or environment.")
+                if user_question and API_KEY:
+                    with st.spinner("🔍 Thinking..."):
+                        response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
+                        st.session_state.chat_history.append({"role": "user", "content": user_question})
+                        st.session_state.chat_history.append({"role": "assistant", "content": response})
                         st.session_state.chat_input = ""
                         st.experimental_rerun()
-
-                    append_user(qq)
-                    with st.spinner("🔍 Thinking..."):
-                        reply = ask_glaucoma_assistant(qq, st.session_state.chat_history, API_KEY)
-                    append_assistant(reply)
-                    st.session_state.chat_input = ""
-                    st.experimental_rerun()
-
+                elif not API_KEY:
+                    st.error("❌ No API key")
         with col2:
             if st.button("🗑️", use_container_width=True):
                 st.session_state.chat_history = []
@@ -539,5 +583,3 @@ if st.session_state.chat_open:
             if st.button("✖️", use_container_width=True):
                 st.session_state.chat_open = False
                 st.experimental_rerun()
-
-# End of app.py
