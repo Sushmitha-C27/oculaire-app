@@ -1,4 +1,4 @@
-# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (query-param toggle)
+# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (fixed button toggle)
 import streamlit as st
 import numpy as np
 import joblib
@@ -27,7 +27,7 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    page_icon="👁️")
 
 # -----------------------
-# Initialize Session State for Chat (prevent AttributeError)
+# Initialize Session State for Chat
 # -----------------------
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
@@ -36,15 +36,7 @@ if 'chat_open' not in st.session_state:
 if 'chat_input' not in st.session_state:
     st.session_state.chat_input = ""
 
-# --- Query param chat toggle (stable method) ---
-params = st.experimental_get_query_params()
-if "open_chat" in params:
-    st.session_state.chat_open = True
-    # clear param so subsequent clicks work
-    st.experimental_set_query_params()
-
 # Get API key from Streamlit secrets or environment variable
-# Priority: Streamlit secrets > Environment variable > User input
 def get_api_key():
     try:
         return st.secrets["GEMINI_API_KEY"]
@@ -172,6 +164,7 @@ st.markdown("""
   z-index: 9999;
   animation: float 3s ease-in-out infinite, glow 2s ease-in-out infinite;
   transition: transform 0.3s ease;
+  border: none;
 }
 .chat-bubble:hover {
   transform: scale(1.1);
@@ -200,6 +193,7 @@ st.markdown("""
   cursor: pointer;
   box-shadow: 0 8px 40px rgba(0,0,0,0.4);
   transition: transform 0.12s ease;
+  border: none;
 }
 .floating-chat-pill:hover { transform: translateY(-4px); }
 
@@ -215,7 +209,7 @@ def ask_glaucoma_assistant(question, history, api_key):
     if not api_key or not api_key.strip():
         return "⚠️ Please configure your Google Gemini API key (see sidebar)."
 
-    system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
+    system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma.
 
 Your role:
 - Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment
@@ -388,7 +382,7 @@ def render_severity(pct):
     return html
 
 # -----------------------
-# SIDEBAR - API Key Status
+# SIDEBAR - API Key Status + Chat Toggle Button
 # -----------------------
 with st.sidebar:
     st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
@@ -398,6 +392,14 @@ with st.sidebar:
     else:
         st.error("❌ No API Key found")
         st.warning("Chatbot will not work without an API key")
+    st.markdown("---")
+
+    # Chat Toggle Button (FIXED - Simple, Reliable)
+    st.markdown("<div style='margin: 20px 0;'></div>", unsafe_allow_html=True)
+    if st.button("💬 Open Chat Assistant", use_container_width=True, key="chat_toggle_btn"):
+        st.session_state.chat_open = not st.session_state.chat_open
+        st.rerun()
+
     st.markdown("---")
     st.markdown("""
     <div style='font-size:12px; color:var(--muted);'>
@@ -420,40 +422,6 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING CHAT WIDGET (Bottom-right corner)
-# -----------------------
-st.markdown('<div class="chat-bubble" id="chatBubble">🤖</div><div class="floating-chat-pill" id="chatPill">Ask Assistant</div>', unsafe_allow_html=True)
-
-# New JS: set URL param open_chat=1 and reload — stable toggle across environments
-st.markdown("""
-<script>
-(function(){
-  function openChat() {
-      try {
-          const url = new URL(window.location.href);
-          url.searchParams.set("open_chat", "1");
-          // navigate to the new URL (reloads the app with param)
-          window.location.href = url.toString();
-      } catch (e) {
-          console.error("Chat open failed:", e);
-      }
-  }
-  const bubble = document.getElementById('chatBubble');
-  const pill   = document.getElementById('chatPill');
-  [bubble, pill].forEach(el => {
-      if (!el) return;
-      el.style.cursor = "pointer";
-      el.addEventListener("click", function(){
-          el.style.transform = "scale(0.95)";
-          setTimeout(()=> el.style.transform = "", 150);
-          openChat();
-      });
-  });
-})();
-</script>
-""", unsafe_allow_html=True)
-
-# -----------------------
 # LAYOUT (uploads etc.)
 # -----------------------
 colA, colB = st.columns(2)
@@ -471,7 +439,7 @@ with colB:
 threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
 # -----------------------
-# ANALYSIS (same as before)
+# ANALYSIS
 # -----------------------
 if rnflt_file or bscan_file:
     figs = []
@@ -555,31 +523,41 @@ if st.session_state.chat_open:
         st.markdown("---")
         st.markdown("<div class='chat-header'>🤖 Glaucoma Assistant</div>", unsafe_allow_html=True)
         st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:15px;'>Ask me anything about glaucoma!</p>", unsafe_allow_html=True)
+
         # Display chat history
-        for msg in st.session_state.chat_history:
-            if msg["role"] == "user":
-                st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-        # Input area bound to session_state.chat_input
+        chat_container = st.container()
+        with chat_container:
+            for msg in st.session_state.chat_history:
+                if msg["role"] == "user":
+                    st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+
+        # Input area
         user_question = st.text_input("Your question:", key="chat_input", placeholder="What is glaucoma?")
         col1, col2, col3 = st.columns([3, 1, 1])
+
         with col1:
-            if st.button("📤 Send", use_container_width=True):
-                if user_question and API_KEY:
+            send_btn = st.button("📤 Send", use_container_width=True, key="send_msg_btn")
+            if send_btn and user_question:
+                if API_KEY:
                     with st.spinner("🔍 Thinking..."):
                         response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
                         st.session_state.chat_history.append({"role": "user", "content": user_question})
                         st.session_state.chat_history.append({"role": "assistant", "content": response})
                         st.session_state.chat_input = ""
-                        st.experimental_rerun()
-                elif not API_KEY:
-                    st.error("❌ No API key")
+                        st.rerun()
+                else:
+                    st.error("❌ No API key configured")
+
         with col2:
-            if st.button("🗑️", use_container_width=True):
+            clear_btn = st.button("🗑️", use_container_width=True, key="clear_history_btn")
+            if clear_btn:
                 st.session_state.chat_history = []
-                st.experimental_rerun()
+                st.rerun()
+
         with col3:
-            if st.button("✖️", use_container_width=True):
+            close_btn = st.button("✖️", use_container_width=True, key="close_chat_btn")
+            if close_btn:
                 st.session_state.chat_open = False
-                st.experimental_rerun()
+                st.rerun()
