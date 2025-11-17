@@ -1,4 +1,5 @@
-# app.py — OCULAIRE Neon Lab v5 with beating floating pill + overlay chat (full file)
+# app.py — OCULAIRE Neon Lab vFinal — full file with MODEL_NAME (gemini-2.5-pro),
+# beating floating pill that opens server-side overlay, and reliable server-side Send.
 # Run: streamlit run app.py
 
 import streamlit as st
@@ -16,12 +17,18 @@ import requests
 import json
 import time
 
-# Try to import google.generativeai, fallback to requests
+# Prefer SDK if installed; fallback to REST
 try:
     import google.generativeai as genai
     USE_SDK = True
 except Exception:
     USE_SDK = False
+
+# -----------------------
+# MODEL CONFIG
+# -----------------------
+# IMPORTANT: for REST URL include the 'models/' prefix (e.g. "models/gemini-2.5-pro")
+MODEL_NAME = "models/gemini-2.5-pro"
 
 # -----------------------
 # Page Config
@@ -36,7 +43,6 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
-# Keep last processed question to avoid duplicate processing across reruns
 if 'last_processed_q' not in st.session_state:
     st.session_state['last_processed_q'] = None
 
@@ -44,10 +50,14 @@ if 'last_processed_q' not in st.session_state:
 # Get API key from Streamlit secrets or environment variable
 # -----------------------
 def get_api_key():
+    # Streamlit secrets first
     try:
-        return st.secrets["GEMINI_API_KEY"]
+        key = st.secrets["GEMINI_API_KEY"]
+        if key:
+            return key
     except Exception:
         pass
+    # Environment fallback
     env_key = os.getenv("GEMINI_API_KEY")
     if env_key:
         return env_key
@@ -158,61 +168,72 @@ footer { visibility:hidden; }
 """, unsafe_allow_html=True)
 
 # -----------------------
-# Chatbot Function
+# ask_glaucoma_assistant using MODEL_NAME for SDK and REST
 # -----------------------
 def ask_glaucoma_assistant(question, history, api_key):
-    """Call Google Gemini API with glaucoma-specific context"""
+    """Call Google Gemini (SDK if available, otherwise REST) using MODEL_NAME."""
     if not api_key or not api_key.strip():
         return "⚠️ Please configure your Google Gemini API key (see sidebar)."
-    system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
 
-Your role:
-- Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment
-- Provide accurate, evidence-based information about glaucoma
-- Explain medical terminology clearly
-- If asked about non-glaucoma topics, politely redirect to glaucoma-related questions
-- Keep responses concise and under 200 words
-- Always include a brief disclaimer that you're providing educational information, not medical advice
+    system_instruction = (
+        "You are a specialized medical AI assistant focused exclusively on glaucoma. "
+        "Answer only glaucoma/OCT/RNFLT-related questions concisely and include a short disclaimer "
+        "that this is educational information, not medical advice."
+    )
 
-Important: Always remind users to consult healthcare professionals for medical decisions."""
     try:
+        # SDK path
         if USE_SDK:
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            # model name passed to SDK (same identifier)
+            model = genai.GenerativeModel(MODEL_NAME)
+
+            # Build conversation history (last 6 messages)
             chat_history = []
             for msg in history[-6:]:
                 role = "user" if msg["role"] == "user" else "model"
                 chat_history.append({"role": role, "parts": [msg["content"]]})
+
             chat = model.start_chat(history=chat_history)
             response = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
             return response.text
+
+        # REST path
         else:
             conversation_context = ""
             for msg in history[-6:]:
                 role = "User" if msg["role"] == "user" else "Assistant"
                 conversation_context += f"{role}: {msg['content']}\n\n"
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
-            response = requests.post(
-                url,
-                headers={"Content-Type": "application/json"},
-                json={
-                    "contents": [{"parts": [{"text": full_prompt}]}],
-                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1000}
-                },
-                timeout=30
-            )
+
+            # Ensure MODEL_NAME contains 'models/' prefix for REST URL
+            url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
+
+            payload = {
+                "contents": [{"parts": [{"text": full_prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": 512
+                }
+            }
+
+            response = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=30)
+
             if response.status_code == 200:
                 data = response.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
+                try:
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                except Exception:
+                    return "❌ Unexpected API response format."
             elif response.status_code == 403:
-                return "🔑 API key invalid. Get a new key at https://aistudio.google.com/apikey"
+                return "🔑 API key invalid or restricted (403)."
             elif response.status_code == 404:
-                return "❌ API not accessible. Your key might be restricted. Try creating a new unrestricted key."
+                return "❌ API not accessible (404) — check model name and API access."
             else:
-                return f"❌ Error ({response.status_code}): {response.text[:200]}"
+                return f"❌ Error ({response.status_code}): {response.text[:300]}"
+
     except Exception as e:
-        return f"❌ Error: {str(e)}\n\nTip: Make sure your API key from https://aistudio.google.com/apikey is unrestricted."
+        return f"❌ Exception while calling assistant: {str(e)}"
 
 # -----------------------
 # Header
@@ -226,7 +247,7 @@ st.markdown("""
 st.markdown("---")
 
 # -----------------------
-# Load Models
+# Load Models (unchanged)
 # -----------------------
 @st.cache_resource
 def load_models():
@@ -247,7 +268,7 @@ def load_models():
 b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models()
 
 # -----------------------
-# Helpers
+# Helpers (unchanged)
 # -----------------------
 def process_npz(f):
     try:
@@ -464,242 +485,103 @@ st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # --------------------------
-# BEATING PILL + OVERLAY (client open/close, server-side processing of question param)
+# Floating pill (client) — clicking reloads page with ?open_chat=1
 # --------------------------
-
-# Read query params so server can process a submitted question once
-query_params = st.experimental_get_query_params()
-open_chat = query_params.get("open_chat", ["0"])[0] in ("1", "true", "True")
-question_param = query_params.get("question", [None])[0]
-
-# If question_param present and not processed before, process it and store history
-if question_param:
-    last_q = st.session_state.get("last_processed_q", None)
-    if question_param != last_q:
-        st.session_state["last_processed_q"] = question_param
-        st.session_state.chat_history.append({"role": "user", "content": question_param})
-        if API_KEY:
-            reply = ask_glaucoma_assistant(question_param, st.session_state.chat_history, API_KEY)
-        else:
-            reply = "❌ No API key configured. Add GEMINI_API_KEY to secrets or environment."
-        st.session_state.chat_history.append({"role": "assistant", "content": reply})
-        # Keep overlay open but remove raw question param to avoid reprocessing on refresh
-        st.experimental_set_query_params(open_chat="1")
-        st.experimental_rerun()
-
-# ---------- Updated floating_html with larger input + robust navigation ----------
-floating_html = r'''
-<div id="oculaire-float-root">
-  <style>
-    /* pill container */
-    #oculaire-pill {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      z-index: 200000;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 20px;
-      border-radius: 999px;
-      background: linear-gradient(90deg,#00f5ff,#ff40c4);
-      box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 40px rgba(0,245,255,0.12);
-      cursor: pointer;
-      transform-origin: center;
-      animation: beat 1.6s infinite ease-in-out;
-      -webkit-user-select: none;
-      user-select: none;
-    }
-
-    @keyframes beat {
-      0% { transform: scale(1); filter: drop-shadow(0 0 12px rgba(0,245,255,0.06)); }
-      25% { transform: scale(1.02); filter: drop-shadow(0 0 20px rgba(0,245,255,0.12)); }
-      50% { transform: scale(1.04); filter: drop-shadow(0 0 30px rgba(255,64,196,0.15)); }
-      75% { transform: scale(1.02); filter: drop-shadow(0 0 20px rgba(0,245,255,0.12)); }
-      100% { transform: scale(1); filter: drop-shadow(0 0 12px rgba(0,245,255,0.06)); }
-    }
-
-    /* icon circle */
-    #oculaire-pill .icon {
-      width: 38px; height: 38px; border-radius:50%;
-      background: white; display:flex; align-items:center; justify-content:center;
-      font-size: 18px; box-shadow: 0 4px 18px rgba(0,0,0,0.45);
-    }
-
-    /* pill label forced white */
-    #oculaire-pill .label {
-      font-weight: 800; font-size: 15px; color: white !important;
-      text-shadow: 0 0 6px rgba(0,0,0,0.6);
-      padding-right: 6px;
-    }
-
-    /* overlay - initially hidden */
-    #oculaire-overlay {
-      position: fixed;
-      bottom: 100px;
-      right: 24px;
-      z-index: 200001;
-      width: 420px;
-      max-width: 92vw;
-      border-radius: 14px;
-      overflow: hidden;
-      background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98));
-      border: 1px solid rgba(255,255,255,0.08);
-      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-      display: none;
-    }
-
-    #oculaire-overlay .hdr {
-      padding: 12px 14px; display:flex; justify-content:space-between; align-items:center;
-      background: rgba(255,255,255,0.02);
-    }
-    #oculaire-overlay .hdr .title { color: white; font-weight:800; font-size:16px; }
-    #oculaire-overlay .hdr .close-btn {
-      background:none; border:none; font-size:18px; color:white; cursor:pointer;
-    }
-
-    #oculaire-overlay .body {
-      padding: 16px 16px; max-height: 300px; overflow-y: auto; color: white;
-      background: transparent;
-    }
-
-    /* == BIGGER input == */
-    #oculaire-overlay .footer {
-      padding: 12px 12px; display:flex; gap:8px; align-items:center; background: rgba(255,255,255,0.01);
-    }
-
-    #oculaire-overlay input[type="text"] {
-      width: 100%;
-      padding:14px 14px;
-      border-radius:10px;
-      border:1px solid rgba(255,255,255,0.06);
-      background: rgba(255,255,255,0.02);
-      color:white;
-      outline:none;
-      font-size:15px;           /* larger font */
-      height:44px;              /* larger clickable area */
-      box-sizing: border-box;
-    }
-
-    .oculaire-btn {
-      padding: 10px 14px; border-radius:10px; border:none; cursor:pointer; font-weight:800; font-size:14px;
-    }
-    .oculaire-btn.send { background: linear-gradient(90deg,#00f5ff,#ff40c4); color:#021617; }
-    .oculaire-btn.clear { background:transparent; color:white; border:1px solid rgba(255,255,255,0.06); }
-
-    @media (max-width: 480px) {
-      #oculaire-overlay { right: 8px; left: 8px; width: auto; bottom: 90px; }
-      #oculaire-pill { right: 12px; bottom: 12px; padding:10px 14px; }
-    }
-
-  </style>
-
-  <!-- PILL -->
-  <div id="oculaire-pill" title="Ask OCULAIRE" role="button" tabindex="0">
-    <div class="icon">💬</div>
-    <div class="label">Ask OCULAIRE</div>
-  </div>
-
-  <!-- OVERLAY -->
-  <div id="oculaire-overlay" role="dialog" aria-label="OCULAIRE chat">
-    <div class="hdr">
-      <div class="title">🤖 OCULAIRE Assistant</div>
-      <button class="close-btn" aria-label="Close chat">✖</button>
-    </div>
-
-    <div class="body" id="oculaire-body">
-      <div id="oculaire-messages">
-        <div style="opacity:0.9; font-size:14px; margin-bottom:10px;">Ask me about glaucoma, OCT, RNFLT...</div>
-      </div>
-    </div>
-
-    <div class="footer">
-      <input id="oculaire-input" type="text" placeholder="Type your question here..." aria-label="Chat input">
-      <button class="oculaire-btn send" id="oculaire-send">Send</button>
-      <button class="oculaire-btn clear" id="oculaire-clear">Clear</button>
-    </div>
-  </div>
-
-  <script>
+pill_html = """
+<div style="position:fixed; bottom:24px; right:24px; z-index:99999;">
+  <div onclick="
     (function(){
-      const pill = document.getElementById('oculaire-pill');
-      const overlay = document.getElementById('oculaire-overlay');
-      const closeBtn = document.querySelector('#oculaire-overlay .close-btn');
-      const sendBtn = document.getElementById('oculaire-send');
-      const clearBtn = document.getElementById('oculaire-clear');
-      const input = document.getElementById('oculaire-input');
-
-      // enable keyboard activation for accessibility
-      pill.addEventListener('keydown', function(e){
-        if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pill.click(); }
-      });
-
-      // Show overlay if open_chat or question present on load
       try {
-        const params = new URLSearchParams(window.location.search);
-        if (params.get('open_chat') === '1') {
-          overlay.style.display = 'block';
-        }
-        if (params.get('question')) {
-          overlay.style.display = 'block';
-          input.value = params.get('question');
-        }
-      } catch(e){ console.warn('oculaire: URL params error', e); }
-
-      // open overlay immediately (no reload)
-      pill.addEventListener('click', function(e){
-        overlay.style.display = 'block';
-        setTimeout(()=> input.focus(), 120);
-      });
-
-      // close overlay (no reload)
-      closeBtn.addEventListener('click', function(e){
-        overlay.style.display = 'none';
-      });
-
-      // clear just hides and clears input
-      clearBtn.addEventListener('click', function(e){
-        input.value = '';
-        overlay.style.display = 'none';
-      });
-
-      // Send: robust navigation with fallbacks + console logs for debugging
-      sendBtn.addEventListener('click', function(e){
-        const q = (input.value || '').trim();
-        if (!q) { input.focus(); return; }
-        try {
-          const url = new URL(window.location.href);
-          url.searchParams.set('open_chat','1');
-          url.searchParams.set('question', q);
-          console.log('oculaire: navigating to', url.toString());
-          // Primary approach
-          window.location.href = url.toString();
-          // Fallbacks (in case some hosts block direct assignment)
-          setTimeout(()=> {
-            try { window.location.assign(url.toString()); } catch(e) { console.warn(e); }
-          }, 150);
-          setTimeout(()=> {
-            try { window.open(url.toString(), '_self'); } catch(e) { console.warn(e); }
-          }, 300);
-        } catch (err) {
-          console.warn('oculaire send fallback', err);
-          window.location.search = '?open_chat=1&question=' + encodeURIComponent(q);
-        }
-      });
-
-      // Enter to send
-      input.addEventListener('keydown', function(e){
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          sendBtn.click();
-        }
-      });
-    })();
-  </script>
+        const u=new URL(window.location.href);
+        u.searchParams.set('open_chat','1');
+        window.location.href = u.toString();
+      } catch(e){
+        window.location.search='?open_chat=1';
+      }
+    })();" 
+    style="display:flex; align-items:center; gap:12px; padding:12px 20px; border-radius:999px; cursor:pointer;
+           background:linear-gradient(90deg,#00f5ff,#ff40c4); box-shadow:0 12px 40px rgba(0,0,0,0.6); animation:beat 1.6s infinite;">
+    <div style="width:36px;height:36px;border-radius:50%;background:white;display:flex;align-items:center;justify-content:center;">💬</div>
+    <div style="font-weight:800;color:white;">Ask OCULAIRE</div>
+  </div>
 </div>
-'''
+<style>
+@keyframes beat {
+  0%{transform:scale(1)}25%{transform:scale(1.02)}50%{transform:scale(1.04)}75%{transform:scale(1.02)}100%{transform:scale(1)}
+}
+</style>
+"""
+components.html(pill_html, height=140)
 
-# render with enough height to avoid clipping
-components.html(floating_html, height=260)
+# -------------------------
+# If open_chat present, render overlay server-side with text_input + send button
+# -------------------------
+params = st.experimental_get_query_params()
+open_chat = params.get("open_chat", ["0"])[0] in ("1","true","True")
 
-# End of file
+if open_chat:
+    # Overlay shell
+    st.markdown("""
+    <div style="
+      position:fixed;
+      bottom:100px;
+      right:24px;
+      width:420px;
+      max-width:92vw;
+      z-index:100000;
+      border-radius:14px;
+      background:linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98));
+      border:1px solid rgba(255,255,255,0.06);
+      padding:0;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    ">
+      <div style="padding:12px 14px; display:flex; justify-content:space-between; align-items:center; color:white;">
+        <div style="font-weight:800; font-size:16px;">🤖 OCULAIRE Assistant</div>
+        <div>
+          <form style="display:inline;">
+            <button formaction="." name="close" value="1" style="background:none; border:none; color:white; font-size:18px; cursor:pointer;">✖</button>
+          </form>
+        </div>
+      </div>
+    """, unsafe_allow_html=True)
+
+    # Show chat history
+    st.markdown("<div style='padding:8px 14px; max-height:260px; overflow:auto;'>", unsafe_allow_html=True)
+    if not st.session_state.chat_history:
+        st.markdown("<div style='color:#cbd5e1; margin-bottom:8px;'>No messages yet. Ask about glaucoma, OCT, or RNFLT.</div>", unsafe_allow_html=True)
+    else:
+        for m in st.session_state.chat_history:
+            if m["role"] == "user":
+                st.markdown(f"<div class='user-msg'><strong>You:</strong> {m['content']}</div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div class='assistant-msg'><strong>OCULAIRE:</strong> {m['content']}</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Server-side input area (reliable)
+    with st.form(key="chat_form", clear_on_submit=False):
+        user_q = st.text_input("", key="server_chat_input", placeholder="Type your question here — e.g., what is OCT?", help="Press Send to submit to the assistant")
+        col1, col2 = st.columns([4,1])
+        with col1:
+            send = st.form_submit_button("Send")
+        with col2:
+            clear = st.form_submit_button("Clear")
+
+        if send and user_q:
+            st.session_state.chat_history.append({"role":"user","content":user_q})
+            reply = ask_glaucoma_assistant(user_q, st.session_state.chat_history, API_KEY)
+            st.session_state.chat_history.append({"role":"assistant","content":reply})
+            st.experimental_set_query_params(open_chat="1")
+            st.experimental_rerun()
+
+        if clear:
+            st.session_state.chat_history = []
+            st.experimental_set_query_params(open_chat="1")
+            st.experimental_rerun()
+
+    # close overlay wrapper
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# -------------------------
+# Footer note
+# -------------------------
+st.markdown("<div style='text-align:center; padding:10px; color:#9aa8c8;'>OCULAIRE Neon Lab — research only</div>", unsafe_allow_html=True)
