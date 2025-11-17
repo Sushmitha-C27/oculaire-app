@@ -1,5 +1,5 @@
 # app.py — OCULAIRE Neon Lab vFinal — full file with MODEL_NAME (gemini-2.5-pro),
-# beating floating pill that opens server-side overlay, and reliable server-side Send.
+# beating floating pill that opens server-side overlay (anchor link), and reliable server-side Send.
 # Run: streamlit run app.py
 
 import streamlit as st
@@ -222,9 +222,13 @@ def ask_glaucoma_assistant(question, history, api_key):
             if response.status_code == 200:
                 data = response.json()
                 try:
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                    return data["candidates"][0]["content"][0]["text"] if "candidates" in data and data["candidates"] and "content" in data["candidates"][0] and data["candidates"][0]["content"] else data["candidates"][0]["content"]["parts"][0]["text"]
                 except Exception:
-                    return "❌ Unexpected API response format."
+                    # defensive fallback to common structure
+                    try:
+                        return data["candidates"][0]["content"]["parts"][0]["text"]
+                    except Exception:
+                        return "❌ Unexpected API response format."
             elif response.status_code == 403:
                 return "🔑 API key invalid or restricted (403)."
             elif response.status_code == 404:
@@ -485,33 +489,40 @@ st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # --------------------------
-# Floating pill (client) — clicking reloads page with ?open_chat=1
+# Floating pill (client) — clicking reloads page with ?open_chat=1 (anchor link — reliable)
 # --------------------------
 pill_html = """
 <div style="position:fixed; bottom:24px; right:24px; z-index:99999;">
-  <div onclick="
-    (function(){
-      try {
-        const u=new URL(window.location.href);
-        u.searchParams.set('open_chat','1');
-        window.location.href = u.toString();
-      } catch(e){
-        window.location.search='?open_chat=1';
-      }
-    })();" 
-    style="display:flex; align-items:center; gap:12px; padding:12px 20px; border-radius:999px; cursor:pointer;
-           background:linear-gradient(90deg,#00f5ff,#ff40c4); box-shadow:0 12px 40px rgba(0,0,0,0.6); animation:beat 1.6s infinite;">
-    <div style="width:36px;height:36px;border-radius:50%;background:white;display:flex;align-items:center;justify-content:center;">💬</div>
-    <div style="font-weight:800;color:white;">Ask OCULAIRE</div>
-  </div>
+  <a href="?open_chat=1" style="text-decoration:none;">
+    <div style="
+        display:flex; align-items:center; gap:12px;
+        padding:14px 22px; border-radius:999px; cursor:pointer;
+        background:linear-gradient(90deg,#00f5ff,#ff40c4);
+        box-shadow:0 12px 40px rgba(0,0,0,0.6);
+        transform-origin:center;
+        animation:beat 1.6s infinite ease-in-out;
+    ">
+      <div style="
+          width:40px; height:40px; border-radius:50%;
+          background:white; display:flex; align-items:center; justify-content:center;
+          font-size:18px; box-shadow:0 4px 18px rgba(0,0,0,0.45);
+      ">💬</div>
+      <div style="font-weight:800; font-size:16px; color:white !important; text-shadow:0 0 6px rgba(0,0,0,0.6);">
+        Ask OCULAIRE
+      </div>
+    </div>
+  </a>
 </div>
+
 <style>
 @keyframes beat {
   0%{transform:scale(1)}25%{transform:scale(1.02)}50%{transform:scale(1.04)}75%{transform:scale(1.02)}100%{transform:scale(1)}
 }
 </style>
 """
-components.html(pill_html, height=140)
+
+# Render the pill — increase height to avoid clipping
+components.html(pill_html, height=180)
 
 # -------------------------
 # If open_chat present, render overlay server-side with text_input + send button
