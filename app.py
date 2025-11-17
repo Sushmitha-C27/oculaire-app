@@ -11,6 +11,8 @@ import os
 import requests
 import json
 import time
+import sqlite3
+from datetime import datetime
 
 # Try to import google.generativeai, fallback to requests
 try:
@@ -283,17 +285,6 @@ Important: Always remind users to consult healthcare professionals for medical d
         return f"❌ Error: {str(e)}"
 
 # -----------------------
-# Header markup
-# -----------------------
-st.markdown("""
-<div class="header">
-  <h1>👁️ OCULAIRE</h1>
-  <h3>AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</h3>
-</div>
-""", unsafe_allow_html=True)
-st.markdown("---")
-
-# -----------------------
 # Load Models (cache)
 # -----------------------
 @st.cache_resource
@@ -379,13 +370,82 @@ def fig_to_png(fig):
     buf.seek(0)
     return buf.getvalue()
 
-def create_pdf(figs):
+def create_pdf(figs, metadata=None):
+    # Create a multipage PDF in-memory using matplotlib PdfPages.
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
+        # cover page with metadata
+        fig = plt.figure(figsize=(8.5,11))
+        fig.patch.set_facecolor('#050612')
+        title = metadata.get('title','OCULAIRE Report') if metadata else 'OCULAIRE Report'
+        subtitle = metadata.get('subtitle','Glaucoma analysis') if metadata else 'Glaucoma analysis'
+        patient = metadata.get('patient','-') if metadata else '-'
+        pid = metadata.get('patient_id','-') if metadata else '-'
+        ts = metadata.get('timestamp', datetime.utcnow().isoformat()) if metadata else datetime.utcnow().isoformat()
+        txt = f"{title}\n\n{subtitle}\n\nPatient: {patient} (ID: {pid})\nTimestamp: {ts}\n\nMetrics:\n"
+        metrics = metadata.get('metrics',{}) if metadata else {}
+        for k,v in metrics.items():
+            txt += f"{k}: {v}\n"
+        txt += f"\nOverall severity: {metadata.get('severity',0):.2f}%\n\nFor research use only. This is not clinical advice."
+        fig.text(0.05, 0.95, txt, va='top', wrap=True, fontsize=10, color='white')
+        pdf.savefig(fig, bbox_inches='tight')
+        plt.close(fig)
+
+        # add provided figures
         for f in figs:
-            pdf.savefig(f, bbox_inches="tight", facecolor=f.get_facecolor())
+            pdf.savefig(f, bbox_inches='tight', facecolor=f.get_facecolor())
+            plt.close(f)
     buf.seek(0)
     return buf.getvalue()
+
+# -----------------------
+# Database (SQLite) helpers for persistent history
+# -----------------------
+DB_PATH = os.path.join('.', 'oculaire_runs.db')
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient TEXT,
+            patient_id TEXT,
+            timestamp TEXT,
+            metrics TEXT,
+            severity REAL,
+            pdf BLOB
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def save_run(patient, patient_id, metrics, severity, pdf_bytes):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('INSERT INTO runs (patient, patient_id, timestamp, metrics, severity, pdf) VALUES (?,?,?,?,?,?)',
+              (patient, patient_id, datetime.utcnow().isoformat(), json.dumps(metrics), float(severity), sqlite3.Binary(pdf_bytes)))
+    conn.commit()
+    conn.close()
+
+def list_runs(limit=20):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT id, patient, patient_id, timestamp, metrics, severity FROM runs ORDER BY id DESC LIMIT ?', (limit,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def load_run_pdf(run_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT pdf FROM runs WHERE id=?', (run_id,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+# init DB on start
+init_db()
 
 # -----------------------
 # Severity renderer (HTML + JS sets width)
@@ -408,7 +468,7 @@ def render_severity(pct):
     return html
 
 # -----------------------
-# Sidebar (API status + RNFLT/B-scan input mode & converters)
+# Sidebar (API status + RNFLT/B-scan input mode & converters + patient quick fields)
 # -----------------------
 with st.sidebar:
     st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
@@ -433,6 +493,11 @@ with st.sidebar:
     <code>export GEMINI_API_KEY="your-key-here"</code><br><br>
     </div>
     """, unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.subheader("Patient (optional)")
+    patient_name = st.text_input("Patient name", key="patient_name")
+    patient_id = st.text_input("Patient ID", key="patient_id")
 
     st.markdown("---")
     st.subheader("RNFLT Input & Tools")
@@ -672,14 +737,55 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
     st.markdown(f"<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
     st.markdown(render_severity(severity_overall), unsafe_allow_html=True)
 
-    # Downloads
+    # Downloads + Persistent Save
     if figs:
         png_bytes = fig_to_png(figs[0])
-        pdf_bytes = create_pdf(figs)
+        pdf_bytes = create_pdf(figs, metadata={
+            'title': 'OCULAIRE Report',
+            'subtitle': 'Glaucoma analysis',
+            'patient': patient_name or '-',
+            'patient_id': patient_id or '-',
+            'timestamp': datetime.utcnow().isoformat(),
+            'metrics': rnflt_metrics or {},
+            'severity': float(severity_overall)
+        })
         st.markdown("<div class='download-btns'>", unsafe_allow_html=True)
         st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
         st.download_button("📄 Download Full Report (PDF)", data=pdf_bytes, file_name="oculaire_report.pdf", mime="application/pdf")
+
+        # Save run button (persist to SQLite)
+        if st.button("💾 Save run to history & store PDF"):
+            try:
+                metrics_to_store = rnflt_metrics or {}
+                save_run(patient_name or '-', patient_id or '-', metrics_to_store, severity_overall, pdf_bytes)
+                st.success("Saved run to local history (SQLite). You can view it in 'Saved Runs' below.")
+            except Exception as e:
+                st.error(f"Error saving run: {e}")
+
         st.markdown("</div>", unsafe_allow_html=True)
+
+    # If user saved runs, show list and allow download
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.subheader("Saved Runs (recent)")
+    runs = list_runs(10)
+    if runs:
+        for r in runs:
+            rid, rpatient, rpid, rts, rmetrics, rsev = r
+            cols = st.columns([3,1,1])
+            with cols[0]:
+                st.markdown(f"**{rpatient}** (ID: {rpid}) — {rts}")
+                st.markdown(f"Severity: {rsev:.2f}% — Metrics: {rmetrics}")
+            with cols[1]:
+                if st.button(f"⬇️ Download PDF #{rid}", key=f"dl_{rid}"):
+                    pdfb = load_run_pdf(rid)
+                    if pdfb:
+                        st.download_button(f"Download run {rid}", data=pdfb, file_name=f"oculaire_run_{rid}.pdf", mime="application/pdf")
+            with cols[2]:
+                if st.button(f"🗑️ Delete #{rid}", key=f"del_{rid}"):
+                    # quick delete (not implemented fully) — simple UX: inform user to clear DB manually for now
+                    st.warning("Delete not implemented in this demo. To remove rows, delete oculaire_runs.db or run cleanup script.")
+    else:
+        st.info("No saved runs yet. Save a run after analysis using the 'Save run to history' button.")
 
 st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
