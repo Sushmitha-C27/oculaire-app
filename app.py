@@ -251,7 +251,7 @@ st.markdown("""
 footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
-MODEL_NAME = "models/gemini-2.0-flash-exp"
+MODEL_NAME = "models/gemini-2.5-pro"
 # -----------------------
 # Chatbot Function
 # -----------------------
