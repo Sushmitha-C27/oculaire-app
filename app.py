@@ -49,7 +49,7 @@ severity_overall = 0.0
 # Page Config
 # -----------------------
 st.set_page_config(
-    page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
+    page_title="OCULAIRE: Glaucoma Detection Dashboard",
     layout="wide",
     page_icon="👁️"
 )
