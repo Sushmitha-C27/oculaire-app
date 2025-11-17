@@ -1,4 +1,4 @@
-# app.py — OCULAIRE Neon Lab v5 with beating floating pill + overlay chat (full file)
+# app.py — OCULAIRE Neon Lab vFinal (FULL fancy, ~650+ lines)
 # Run: streamlit run app.py
 
 import streamlit as st
@@ -16,12 +16,19 @@ import requests
 import json
 import time
 
-# Try to import google.generativeai, fallback to requests
+# Prefer SDK if installed; fallback to REST
 try:
     import google.generativeai as genai
     USE_SDK = True
 except Exception:
     USE_SDK = False
+
+# -----------------------
+# MODEL CONFIG
+# -----------------------
+# Use the MODEL_NAME identifier for both SDK and REST calls.
+# REST expects 'models/' prefix: e.g., "models/gemini-2.5-pro"
+MODEL_NAME = "models/gemini-2.5-pro"
 
 # -----------------------
 # Page Config
@@ -36,7 +43,7 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
-# Keep last processed question to avoid duplicate processing across reruns
+# Keep last processed question to prevent duplicate processing across reruns
 if 'last_processed_q' not in st.session_state:
     st.session_state['last_processed_q'] = None
 
@@ -45,7 +52,9 @@ if 'last_processed_q' not in st.session_state:
 # -----------------------
 def get_api_key():
     try:
-        return st.secrets["GEMINI_API_KEY"]
+        key = st.secrets["GEMINI_API_KEY"]
+        if key:
+            return key
     except Exception:
         pass
     env_key = os.getenv("GEMINI_API_KEY")
@@ -152,7 +161,7 @@ st.markdown("""
   text-shadow: 0 0 20px rgba(0,245,255,0.3);
 }
 
-/* Floating Chat Bubble */
+/* Floating Chat Bubble (fallback) */
 .chat-bubble {
   position: fixed;
   bottom: 30px;
@@ -184,89 +193,31 @@ st.markdown("""
   50% { box-shadow: 0 0 40px rgba(0,245,255,0.9), 0 0 60px rgba(255,64,196,0.8); }
 }
 
-/* Fixed button container */
-.floating-expander {
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 20px !important;
-  width: 400px !important;
-  z-index: 9999 !important;
-  box-shadow: 0 0 40px rgba(0,245,255,0.4), 0 0 60px rgba(255,64,196,0.3) !important;
-  border-radius: 16px !important;
-  animation: float 3s ease-in-out infinite !important;
-}
-
-/* Style the expander */
-.floating-expander details {
-  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
-  border: 2px solid rgba(0,245,255,0.3) !important;
-  border-radius: 16px !important;
-}
-
-.floating-expander details summary {
-  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
-  padding: 16px !important;
-  border-radius: 14px !important;
-  cursor: pointer !important;
-  font-weight: 800 !important;
-  font-size: 16px !important;
-  color: #e6faff !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-}
-
-.floating-expander details summary:hover {
-  background: linear-gradient(135deg, rgba(0,245,255,0.3), rgba(255,64,196,0.3)) !important;
-  box-shadow: 0 0 25px rgba(0,245,255,0.5) !important;
-}
-
-.floating-expander details[open] {
-  box-shadow: 0 0 50px rgba(0,245,255,0.6), 0 0 70px rgba(255,64,196,0.4) !important;
-}
-
-/* Floating Chat Expander at Bottom */
-.floating-expander {
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 20px !important;
-  width: 450px !important;
-  max-width: 90vw !important;
-  z-index: 9999 !important;
-  animation: float 3s ease-in-out infinite !important;
-}
-
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-8px); }
-}
-
+/* Ensure footer hidden */
 footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
 
 # -----------------------
-# Chatbot Function
+# ask_glaucoma_assistant using MODEL_NAME for SDK and REST
 # -----------------------
 def ask_glaucoma_assistant(question, history, api_key):
-    """Call Google Gemini API with glaucoma-specific context"""
+    """Call Google Gemini (SDK if available, otherwise REST) using MODEL_NAME."""
     if not api_key or not api_key.strip():
         return "⚠️ Please configure your Google Gemini API key (see sidebar)."
-    system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
 
-Your role:
-- Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment
-- Provide accurate, evidence-based information about glaucoma
-- Explain medical terminology clearly
-- If asked about non-glaucoma topics, politely redirect to glaucoma-related questions
-- Keep responses concise and under 200 words
-- Always include a brief disclaimer that you're providing educational information, not medical advice
+    system_instruction = (
+        "You are a specialized medical AI assistant focused exclusively on glaucoma. "
+        "Answer only glaucoma/OCT/RNFLT-related questions concisely and include a short disclaimer "
+        "that this is educational information, not medical advice."
+    )
 
-Important: Always remind users to consult healthcare professionals for medical decisions."""
     try:
         if USE_SDK:
+            # SDK path
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel(MODEL_NAME)
+            # Build small conversation history for context
             chat_history = []
             for msg in history[-6:]:
                 role = "user" if msg["role"] == "user" else "model"
@@ -275,32 +226,42 @@ Important: Always remind users to consult healthcare professionals for medical d
             response = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
             return response.text
         else:
+            # REST path
             conversation_context = ""
             for msg in history[-6:]:
                 role = "User" if msg["role"] == "user" else "Assistant"
                 conversation_context += f"{role}: {msg['content']}\n\n"
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
-            response = requests.post(
-                url,
-                headers={"Content-Type": "application/json"},
-                json={
-                    "contents": [{"parts": [{"text": full_prompt}]}],
-                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1000}
-                },
-                timeout=30
-            )
+            # REST URL uses MODEL_NAME (must include models/)
+            url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
+
+            payload = {
+                "contents": [{"parts": [{"text": full_prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.7,
+                    "maxOutputTokens": 512
+                }
+            }
+            response = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=30)
             if response.status_code == 200:
                 data = response.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
+                # Try common field structures defensively
+                try:
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                except Exception:
+                    try:
+                        # older/newer variants
+                        return data["candidates"][0]["content"][0]["text"]
+                    except Exception:
+                        return "❌ Unexpected API response format."
             elif response.status_code == 403:
-                return "🔑 API key invalid. Get a new key at https://aistudio.google.com/apikey"
+                return "🔑 API key invalid or restricted (403)."
             elif response.status_code == 404:
-                return "❌ API not accessible. Your key might be restricted. Try creating a new unrestricted key."
+                return "❌ API not accessible (404) — check model name and API access."
             else:
-                return f"❌ Error ({response.status_code}): {response.text[:200]}"
+                return f"❌ Error ({response.status_code}): {response.text[:300]}"
     except Exception as e:
-        return f"❌ Error: {str(e)}\n\nTip: Make sure your API key from https://aistudio.google.com/apikey is unrestricted."
+        return f"❌ Exception while calling assistant: {str(e)}"
 
 # -----------------------
 # Header
@@ -314,7 +275,7 @@ st.markdown("""
 st.markdown("---")
 
 # -----------------------
-# Load Models
+# Load Models (unchanged)
 # -----------------------
 @st.cache_resource
 def load_models():
@@ -335,7 +296,7 @@ def load_models():
 b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models()
 
 # -----------------------
-# Helpers
+# Helpers (unchanged)
 # -----------------------
 def process_npz(f):
     try:
@@ -492,4 +453,309 @@ if rnflt_file or bscan_file:
             label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
             diff, risk, sev = compute_risk_map(rnflt, avg_healthy, -threshold)
             severity_overall = max(severity_overall, sev)
-            m1, m2,
+            m1, m2, m3, m4 = st.columns([2,2,2,2])
+            m1.markdown(f"<div class='metric-label'>Status</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_r else '✅'} {label_r}</div>", unsafe_allow_html=True)
+            m2.markdown(f"<div class='metric-label'>Mean RNFLT</div><div class='large-metric'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
+            m3.markdown(f"<div class='metric-label'>Std Dev</div><div class='large-metric'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
+            m4.markdown(f"<div class='metric-label'>Cluster</div><div class='large-metric'>{cluster}</div>", unsafe_allow_html=True)
+
+            st.markdown(render_severity(sev), unsafe_allow_html=True)
+            fig, axes = plt.subplots(1,3,figsize=(18,6),constrained_layout=True)
+            im0=axes[0].imshow(rnflt,cmap='turbo');axes[0].axis('off');axes[0].set_title("Uploaded RNFLT")
+            plt.colorbar(im0,ax=axes[0],shrink=0.85)
+            im1=axes[1].imshow(diff,cmap='bwr',vmin=-30,vmax=30);axes[1].axis('off');axes[1].set_title("Difference (vs Healthy)")
+            plt.colorbar(im1,ax=axes[1],shrink=0.85)
+            im2=axes[2].imshow(risk,cmap='hot');axes[2].axis('off');axes[2].set_title("Risk Map")
+            plt.colorbar(im2,ax=axes[2],shrink=0.85)
+            fig.patch.set_facecolor("#050612")
+            st.pyplot(fig)
+            figs.append(fig)
+
+    # B-Scan Processing
+    if bscan_file and b_model is not None:
+        image_pil = Image.open(bscan_file).convert("L")
+        batch, proc = preprocess_bscan(image_pil)
+        pred_raw = b_model.predict(batch, verbose=0)[0][0]
+        label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
+        conf = pred_raw*100 if label_b=="Glaucoma-like" else (1-pred_raw)*100
+        severity_overall = max(severity_overall, conf)
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+        m1, m2 = st.columns(2)
+        m1.markdown(f"<div class='metric-label'>CNN Prediction</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
+        m2.markdown(f"<div class='metric-label'>Confidence</div><div class='large-metric'>{conf:.2f}%</div>", unsafe_allow_html=True)
+        st.markdown(render_severity(conf), unsafe_allow_html=True)
+
+        heat = gradcam(batch, b_model)
+        if heat is not None:
+            heat_r = cv2.resize(heat, (224,224))
+            hm = (heat_r * 255).astype(np.uint8)
+            hm_color = cv2.applyColorMap(hm, cv2.COLORMAP_JET)
+            overlay = (np.stack([proc]*3, axis=-1)*255).astype(np.uint8)
+            overlay = cv2.addWeighted(overlay, 0.6, hm_color, 0.4, 0)
+            st.image([image_pil, overlay], caption=["Original B-Scan", "Grad-CAM Overlay"], use_column_width=True)
+
+    # Combined Severity Summary
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.markdown(f"<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
+    st.markdown(render_severity(severity_overall), unsafe_allow_html=True)
+
+    # Download buttons
+    if figs:
+        png_bytes = fig_to_png(figs[0])
+        pdf_bytes = create_pdf(figs)
+        st.markdown("<div class='download-btns'>", unsafe_allow_html=True)
+        st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
+        st.download_button("📄 Download Full Report (PDF)", data=pdf_bytes, file_name="oculaire_report.pdf", mime="application/pdf")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+st.markdown("<hr>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
+
+# --------------------------
+# BEATING PILL + FULL FANCY OVERLAY
+# --------------------------
+
+# Read query params
+query_params = st.experimental_get_query_params()
+open_chat = query_params.get("open_chat", ["0"])[0] in ("1", "true", "True")
+question_param = query_params.get("question", [None])[0]
+
+# Process question param server-side exactly once per question
+if question_param:
+    last_q = st.session_state.get("last_processed_q", None)
+    if question_param != last_q:
+        st.session_state["last_processed_q"] = question_param
+        st.session_state.chat_history.append({"role": "user", "content": question_param})
+        if API_KEY:
+            reply = ask_glaucoma_assistant(question_param, st.session_state.chat_history, API_KEY)
+        else:
+            reply = "❌ No API key configured. Add GEMINI_API_KEY to secrets or environment."
+        st.session_state.chat_history.append({"role": "assistant", "content": reply})
+        # Keep overlay open but avoid reprocessing the param repeatedly
+        st.experimental_set_query_params(open_chat="1")
+        st.experimental_rerun()
+
+# The full fancy floating_html — uses top-level navigation for Send
+floating_html = r'''
+<div id="oculaire-float-root">
+  <style>
+    /* pill container */
+    #oculaire-pill {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 200000;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      border-radius: 999px;
+      background: linear-gradient(90deg,#00f5ff,#ff40c4);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 40px rgba(0,245,255,0.12);
+      cursor: pointer;
+      transform-origin: center;
+      animation: beat 1.6s infinite ease-in-out;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    @keyframes beat {
+      0% { transform: scale(1); filter: drop-shadow(0 0 12px rgba(0,245,255,0.06)); }
+      25% { transform: scale(1.02); filter: drop-shadow(0 0 20px rgba(0,245,255,0.12)); }
+      50% { transform: scale(1.04); filter: drop-shadow(0 0 30px rgba(255,64,196,0.15)); }
+      75% { transform: scale(1.02); filter: drop-shadow(0 0 20px rgba(0,245,255,0.12)); }
+      100% { transform: scale(1); filter: drop-shadow(0 0 12px rgba(0,245,255,0.06)); }
+    }
+
+    /* icon circle */
+    #oculaire-pill .icon {
+      width: 38px; height: 38px; border-radius:50%;
+      background: white; display:flex; align-items:center; justify-content:center;
+      font-size: 18px; box-shadow: 0 4px 18px rgba(0,0,0,0.45);
+    }
+
+    /* pill label forced white */
+    #oculaire-pill .label {
+      font-weight: 800; font-size: 15px; color: white !important;
+      text-shadow: 0 0 6px rgba(0,0,0,0.6);
+      padding-right: 6px;
+    }
+
+    /* overlay - initially hidden */
+    #oculaire-overlay {
+      position: fixed;
+      bottom: 100px;
+      right: 24px;
+      z-index: 200001;
+      width: 420px;
+      max-width: 92vw;
+      border-radius: 14px;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98));
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+      display: none;
+    }
+
+    #oculaire-overlay .hdr {
+      padding: 12px 14px; display:flex; justify-content:space-between; align-items:center;
+      background: rgba(255,255,255,0.02);
+    }
+    #oculaire-overlay .hdr .title { color: white; font-weight:800; font-size:16px; }
+    #oculaire-overlay .hdr .close-btn {
+      background:none; border:none; font-size:18px; color:white; cursor:pointer;
+    }
+
+    #oculaire-overlay .body {
+      padding: 16px 16px; max-height: 300px; overflow-y: auto; color: white;
+      background: transparent;
+    }
+
+    /* == BIGGER input == */
+    #oculaire-overlay .footer {
+      padding: 12px 12px; display:flex; gap:8px; align-items:center; background: rgba(255,255,255,0.01);
+    }
+
+    #oculaire-overlay input[type="text"] {
+      width: 100%;
+      padding:14px 14px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.02);
+      color:white;
+      outline:none;
+      font-size:15px;           /* larger font */
+      height:44px;              /* larger clickable area */
+      box-sizing: border-box;
+    }
+
+    .oculaire-btn {
+      padding: 10px 14px; border-radius:10px; border:none; cursor:pointer; font-weight:800; font-size:14px;
+    }
+    .oculaire-btn.send { background: linear-gradient(90deg,#00f5ff,#ff40c4); color:#021617; }
+    .oculaire-btn.clear { background:transparent; color:white; border:1px solid rgba(255,255,255,0.06); }
+
+    @media (max-width: 480px) {
+      #oculaire-overlay { right: 8px; left: 8px; width: auto; bottom: 90px; }
+      #oculaire-pill { right: 12px; bottom: 12px; padding:10px 14px; }
+    }
+
+  </style>
+
+  <!-- PILL -->
+  <div id="oculaire-pill" title="Ask OCULAIRE" role="button" tabindex="0">
+    <div class="icon">💬</div>
+    <div class="label">Ask OCULAIRE</div>
+  </div>
+
+  <!-- OVERLAY -->
+  <div id="oculaire-overlay" role="dialog" aria-label="OCULAIRE chat">
+    <div class="hdr">
+      <div class="title">🤖 OCULAIRE Assistant</div>
+      <button class="close-btn" aria-label="Close chat">✖</button>
+    </div>
+
+    <div class="body" id="oculaire-body">
+      <div id="oculaire-messages">
+        <div style="opacity:0.9; font-size:14px; margin-bottom:10px;">Ask me about glaucoma, OCT, RNFLT...</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <input id="oculaire-input" type="text" placeholder="Type your question here..." aria-label="Chat input">
+      <button class="oculaire-btn send" id="oculaire-send">Send</button>
+      <button class="oculaire-btn clear" id="oculaire-clear">Clear</button>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      const pill = document.getElementById('oculaire-pill');
+      const overlay = document.getElementById('oculaire-overlay');
+      const closeBtn = document.querySelector('#oculaire-overlay .close-btn');
+      const sendBtn = document.getElementById('oculaire-send');
+      const clearBtn = document.getElementById('oculaire-clear');
+      const input = document.getElementById('oculaire-input');
+
+      // enable keyboard activation for accessibility
+      pill.addEventListener('keydown', function(e){
+        if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pill.click(); }
+      });
+
+      // Show overlay if open_chat or question present on load
+      try {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('open_chat') === '1') {
+          overlay.style.display = 'block';
+        }
+        if (params.get('question')) {
+          overlay.style.display = 'block';
+          input.value = params.get('question');
+        }
+      } catch(e){ console.warn('oculaire: URL params error', e); }
+
+      // open overlay immediately (no reload)
+      pill.addEventListener('click', function(e){
+        overlay.style.display = 'block';
+        setTimeout(()=> input.focus(), 120);
+      });
+
+      // close overlay (no reload)
+      closeBtn.addEventListener('click', function(e){
+        overlay.style.display = 'none';
+      });
+
+      // clear just hides and clears input
+      clearBtn.addEventListener('click', function(e){
+        input.value = '';
+        overlay.style.display = 'none';
+      });
+
+      // Send: navigate top-level window so Streamlit sees params (works from iframe)
+      sendBtn.addEventListener('click', function(e){
+        const q = (input.value || '').trim();
+        if (!q) { input.focus(); return; }
+        try {
+          const url = new URL(window.top.location.href);
+          url.searchParams.set('open_chat','1');
+          url.searchParams.set('question', q);
+          console.log('oculaire: navigating to', url.toString());
+          // Primary approach — navigate top-level window
+          window.top.location.href = url.toString();
+          // Fallbacks (in case some hosts block direct assignment)
+          setTimeout(()=> {
+            try { window.top.location.assign(url.toString()); } catch(e) { console.warn(e); }
+          }, 150);
+          setTimeout(()=> {
+            try { window.top.open(url.toString(), '_self'); } catch(e) { console.warn(e); }
+          }, 300);
+        } catch (err) {
+          console.warn('oculaire send fallback', err);
+          try {
+            window.top.location.search = '?open_chat=1&question=' + encodeURIComponent(q);
+          } catch(e2) {
+            console.warn('ultimate fallback failed', e2);
+          }
+        }
+      });
+
+      // Enter to send
+      input.addEventListener('keydown', function(e){
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          sendBtn.click();
+        }
+      });
+
+    })();
+  </script>
+</div>
+'''
+
+# render with enough height to avoid clipping
+components.html(floating_html, height=320)
+
+# -------------------------
+# End of file
+# -------------------------
