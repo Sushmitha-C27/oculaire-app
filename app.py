@@ -536,7 +536,10 @@ if question_param:
         st.experimental_set_query_params(open_chat="1")
         st.experimental_rerun()
 
-# The full fancy floating_html — uses top-level navigation for Send
+# ===============================
+# FINAL FULL FANCY FLOATING WIDGET
+# ===============================
+
 floating_html = r'''
 <div id="oculaire-float-root">
   <style>
@@ -561,28 +564,24 @@ floating_html = r'''
     }
 
     @keyframes beat {
-      0% { transform: scale(1); filter: drop-shadow(0 0 12px rgba(0,245,255,0.06)); }
-      25% { transform: scale(1.02); filter: drop-shadow(0 0 20px rgba(0,245,255,0.12)); }
-      50% { transform: scale(1.04); filter: drop-shadow(0 0 30px rgba(255,64,196,0.15)); }
-      75% { transform: scale(1.02); filter: drop-shadow(0 0 20px rgba(0,245,255,0.12)); }
-      100% { transform: scale(1); filter: drop-shadow(0 0 12px rgba(0,245,255,0.06)); }
+      0% { transform: scale(1); }
+      50% { transform: scale(1.06); }
+      100% { transform: scale(1); }
     }
 
-    /* icon circle */
     #oculaire-pill .icon {
       width: 38px; height: 38px; border-radius:50%;
       background: white; display:flex; align-items:center; justify-content:center;
       font-size: 18px; box-shadow: 0 4px 18px rgba(0,0,0,0.45);
     }
 
-    /* pill label forced white */
     #oculaire-pill .label {
       font-weight: 800; font-size: 15px; color: white !important;
       text-shadow: 0 0 6px rgba(0,0,0,0.6);
       padding-right: 6px;
     }
 
-    /* overlay - initially hidden */
+    /* overlay */
     #oculaire-overlay {
       position: fixed;
       bottom: 100px;
@@ -602,19 +601,20 @@ floating_html = r'''
       padding: 12px 14px; display:flex; justify-content:space-between; align-items:center;
       background: rgba(255,255,255,0.02);
     }
+
     #oculaire-overlay .hdr .title { color: white; font-weight:800; font-size:16px; }
+
     #oculaire-overlay .hdr .close-btn {
       background:none; border:none; font-size:18px; color:white; cursor:pointer;
     }
 
     #oculaire-overlay .body {
       padding: 16px 16px; max-height: 300px; overflow-y: auto; color: white;
-      background: transparent;
     }
 
-    /* == BIGGER input == */
     #oculaire-overlay .footer {
-      padding: 12px 12px; display:flex; gap:8px; align-items:center; background: rgba(255,255,255,0.01);
+      padding: 12px 12px; display:flex; gap:8px; align-items:center;
+      background: rgba(255,255,255,0.01);
     }
 
     #oculaire-overlay input[type="text"] {
@@ -625,45 +625,50 @@ floating_html = r'''
       background: rgba(255,255,255,0.02);
       color:white;
       outline:none;
-      font-size:15px;           /* larger font */
-      height:44px;              /* larger clickable area */
+      font-size:15px;
+      height:44px;
       box-sizing: border-box;
     }
 
     .oculaire-btn {
-      padding: 10px 14px; border-radius:10px; border:none; cursor:pointer; font-weight:800; font-size:14px;
-    }
-    .oculaire-btn.send { background: linear-gradient(90deg,#00f5ff,#ff40c4); color:#021617; }
-    .oculaire-btn.clear { background:transparent; color:white; border:1px solid rgba(255,255,255,0.06); }
-
-    @media (max-width: 480px) {
-      #oculaire-overlay { right: 8px; left: 8px; width: auto; bottom: 90px; }
-      #oculaire-pill { right: 12px; bottom: 12px; padding:10px 14px; }
+      padding: 10px 14px; border-radius:10px; border:none;
+      cursor:pointer; font-weight:800; font-size:14px;
     }
 
+    .oculaire-btn.send {
+      background: linear-gradient(90deg,#00f5ff,#ff40c4);
+      color:#021617;
+    }
+    .oculaire-btn.clear {
+      background:transparent;
+      color:white;
+      border:1px solid rgba(255,255,255,0.06);
+    }
   </style>
 
-  <!-- PILL -->
-  <div id="oculaire-pill" title="Ask OCULAIRE" role="button" tabindex="0">
+  <!-- Floating pill -->
+  <div id="oculaire-pill">
     <div class="icon">💬</div>
     <div class="label">Ask OCULAIRE</div>
   </div>
 
-  <!-- OVERLAY -->
-  <div id="oculaire-overlay" role="dialog" aria-label="OCULAIRE chat">
+  <!-- Overlay -->
+  <div id="oculaire-overlay">
     <div class="hdr">
       <div class="title">🤖 OCULAIRE Assistant</div>
-      <button class="close-btn" aria-label="Close chat">✖</button>
+      <button class="close-btn">✖</button>
     </div>
 
     <div class="body" id="oculaire-body">
       <div id="oculaire-messages">
-        <div style="opacity:0.9; font-size:14px; margin-bottom:10px;">Ask me about glaucoma, OCT, RNFLT...</div>
+        <div style="opacity:0.8; font-size:14px; margin-bottom:10px;">
+          Ask me anything about Glaucoma, OCT, RNFLT, or eye health…
+        </div>
       </div>
     </div>
 
     <div class="footer">
-      <input id="oculaire-input" type="text" placeholder="Type your question here..." aria-label="Chat input">
+      <input id="oculaire-input" type="text" placeholder="Type your question…">
       <button class="oculaire-btn send" id="oculaire-send">Send</button>
       <button class="oculaire-btn clear" id="oculaire-clear">Clear</button>
     </div>
@@ -678,134 +683,70 @@ floating_html = r'''
       const clearBtn = document.getElementById('oculaire-clear');
       const input = document.getElementById('oculaire-input');
 
-      // enable keyboard activation for accessibility
-      pill.addEventListener('keydown', function(e){
-        if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pill.click(); }
+      // Open overlay
+      pill.addEventListener('click', function(){
+        overlay.style.display = 'block';
+        setTimeout(()=> input.focus(), 120);
       });
 
-      // Show overlay if open_chat or question present on load
+      // Close overlay
+      closeBtn.addEventListener('click', ()=> overlay.style.display = 'none');
+      clearBtn.addEventListener('click', ()=> {
+        input.value = '';
+        overlay.style.display = 'none';
+      });
+
+      // Show overlay if URL has open_chat
       try {
         const params = new URLSearchParams(window.location.search);
         if (params.get('open_chat') === '1') {
           overlay.style.display = 'block';
         }
-        if (params.get('question')) {
-          overlay.style.display = 'block';
-          input.value = params.get('question');
+      } catch(e){}
+
+      // =============== SEND BUTTON (Working Navigation) ===============
+      sendBtn.addEventListener('click', function(){
+        const q = (input.value || '').trim();
+        if (!q) { input.focus(); return; }
+
+        let url;
+        try { url = new URL(window.top.location.href); }
+        catch { url = new URL(window.location.href); }
+
+        url.searchParams.set("open_chat", "1");
+        url.searchParams.set("question", q);
+        const finalUrl = url.toString();
+        console.log("oculaire: navigating ->", finalUrl);
+
+        // 1) primary
+        try { window.top.location.href = finalUrl; return; } catch(e){}
+        // 2) parent
+        try { window.parent.location.href = finalUrl; return; } catch(e){}
+        // 3) anchor fallback
+        try {
+          const a = document.createElement('a');
+          a.href = finalUrl; a.target = "_top";
+          document.body.appendChild(a); a.click(); a.remove();
+          return;
+        } catch(e){}
+        // 4) window.open fallback
+        try { window.open(finalUrl, "_top"); return; } catch(e){}
+        // 5) last fallback
+        window.location.search = "?open_chat=1&question=" + encodeURIComponent(q);
+      });
+
+      // Enter key to send
+      input.addEventListener('keydown', function(e){
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          sendBtn.click();
         }
-      } catch(e){ console.warn('oculaire: URL params error', e); }
-
-      // open overlay immediately (no reload)
-      pill.addEventListener('click', function(e){
-        overlay.style.display = 'block';
-        setTimeout(()=> input.focus(), 120);
       });
 
-      // close overlay (no reload)
-      closeBtn.addEventListener('click', function(e){
-        overlay.style.display = 'none';
-      });
+    })();
+  </script>
+</div>
+'''
 
-      // clear just hides and clears input
-      clearBtn.addEventListener('click', function(e){
-        input.value = '';
-        overlay.style.display = 'none';
-      });
-
-      // Send: navigate top-level window so Streamlit sees params (works from iframe)
-     // ===== Robust Send handler (replace your old send handler with this) =====
-sendBtn.addEventListener('click', function(e){
-  const q = (input.value || '').trim();
-  if (!q) { input.focus(); return; }
-
-  // build target URL for top-level navigation
-  let targetUrl;
-  try {
-    // prefer building from top href if possible so query param merging is consistent
-    targetUrl = new URL(window.top.location.href);
-  } catch (errTop) {
-    try {
-      targetUrl = new URL(window.location.href);
-    } catch (errLocal) {
-      targetUrl = null;
-    }
-  }
-  if (!targetUrl) {
-    // fallback string
-    const fallback = '?open_chat=1&question=' + encodeURIComponent(q);
-    console.warn('oculaire: could not construct URL object, using fallback search:', fallback);
-    try { window.top.location.search = fallback; return; } catch(e){ try { window.location.search = fallback; } catch(e2){ console.warn('oculaire: ultimate fallback failed', e2); } }
-    return;
-  }
-
-  targetUrl.searchParams.set('open_chat','1');
-  targetUrl.searchParams.set('question', q);
-  const urlStr = targetUrl.toString();
-  console.log('oculaire: NAV ATTEMPT ->', urlStr);
-
-  // navigation helper tries many options
-  function tryAssignHref(url) {
-    try {
-      window.top.location.href = url;
-      console.log('oculaire: NAV - used window.top.location.href');
-      return true;
-    } catch(e){ console.warn('oculaire: top.href failed', e); }
-    try {
-      window.parent.location.href = url;
-      console.log('oculaire: NAV - used window.parent.location.href');
-      return true;
-    } catch(e){ console.warn('oculaire: parent.href failed', e); }
-
-    try {
-      // anchor with target _top
-      const a = document.createElement('a');
-      a.href = url;
-      a.target = '_top';
-      a.style.display = 'none';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      console.log('oculaire: NAV - used anchor target=_top click');
-      return true;
-    } catch(e){ console.warn('oculaire: anchor click failed', e); }
-
-    try {
-      window.open(url, '_top');
-      console.log('oculaire: NAV - used window.open(_top)');
-      return true;
-    } catch(e){ console.warn('oculaire: window.open failed', e); }
-
-    try {
-      window.location.href = url;
-      console.log('oculaire: NAV - used window.location.href (iframe)');
-      return true;
-    } catch(e){ console.warn('oculaire: window.location fallback failed', e); }
-
-    return false;
-  }
-
-  const ok = tryAssignHref(urlStr);
-  if (!ok) {
-    // last resort: set search on top (may throw)
-    try {
-      window.top.location.search = '?open_chat=1&question=' + encodeURIComponent(q);
-      console.log('oculaire: NAV - used top.location.search fallback');
-    } catch (e) {
-      try {
-        window.location.search = '?open_chat=1&question=' + encodeURIComponent(q);
-        console.log('oculaire: NAV - used location.search fallback');
-      } catch (e2) {
-        console.error('oculaire: NAV - all navigation attempts failed', e2);
-        alert('Navigation blocked by browser/host. Try opening the app in a new tab or disable extensions that block navigation.');
-      }
-    }
-  }
-});
-
-
-# render with enough height to avoid clipping
-components.html(floating_html, height=320)
-
-# -------------------------
-# End of file
-# -------------------------
+# Render widget
+components.html(floating_html, height=330)
