@@ -713,45 +713,95 @@ floating_html = r'''
       });
 
       // Send: navigate top-level window so Streamlit sees params (works from iframe)
-      sendBtn.addEventListener('click', function(e){
-        const q = (input.value || '').trim();
-        if (!q) { input.focus(); return; }
-        try {
-          const url = new URL(window.top.location.href);
-          url.searchParams.set('open_chat','1');
-          url.searchParams.set('question', q);
-          console.log('oculaire: navigating to', url.toString());
-          // Primary approach — navigate top-level window
-          window.top.location.href = url.toString();
-          // Fallbacks (in case some hosts block direct assignment)
-          setTimeout(()=> {
-            try { window.top.location.assign(url.toString()); } catch(e) { console.warn(e); }
-          }, 150);
-          setTimeout(()=> {
-            try { window.top.open(url.toString(), '_self'); } catch(e) { console.warn(e); }
-          }, 300);
-        } catch (err) {
-          console.warn('oculaire send fallback', err);
-          try {
-            window.top.location.search = '?open_chat=1&question=' + encodeURIComponent(q);
-          } catch(e2) {
-            console.warn('ultimate fallback failed', e2);
-          }
-        }
-      });
+     // ===== Robust Send handler (replace your old send handler with this) =====
+sendBtn.addEventListener('click', function(e){
+  const q = (input.value || '').trim();
+  if (!q) { input.focus(); return; }
 
-      // Enter to send
-      input.addEventListener('keydown', function(e){
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          sendBtn.click();
-        }
-      });
+  // build target URL for top-level navigation
+  let targetUrl;
+  try {
+    // prefer building from top href if possible so query param merging is consistent
+    targetUrl = new URL(window.top.location.href);
+  } catch (errTop) {
+    try {
+      targetUrl = new URL(window.location.href);
+    } catch (errLocal) {
+      targetUrl = null;
+    }
+  }
+  if (!targetUrl) {
+    // fallback string
+    const fallback = '?open_chat=1&question=' + encodeURIComponent(q);
+    console.warn('oculaire: could not construct URL object, using fallback search:', fallback);
+    try { window.top.location.search = fallback; return; } catch(e){ try { window.location.search = fallback; } catch(e2){ console.warn('oculaire: ultimate fallback failed', e2); } }
+    return;
+  }
 
-    })();
-  </script>
-</div>
-'''
+  targetUrl.searchParams.set('open_chat','1');
+  targetUrl.searchParams.set('question', q);
+  const urlStr = targetUrl.toString();
+  console.log('oculaire: NAV ATTEMPT ->', urlStr);
+
+  // navigation helper tries many options
+  function tryAssignHref(url) {
+    try {
+      window.top.location.href = url;
+      console.log('oculaire: NAV - used window.top.location.href');
+      return true;
+    } catch(e){ console.warn('oculaire: top.href failed', e); }
+    try {
+      window.parent.location.href = url;
+      console.log('oculaire: NAV - used window.parent.location.href');
+      return true;
+    } catch(e){ console.warn('oculaire: parent.href failed', e); }
+
+    try {
+      // anchor with target _top
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_top';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      console.log('oculaire: NAV - used anchor target=_top click');
+      return true;
+    } catch(e){ console.warn('oculaire: anchor click failed', e); }
+
+    try {
+      window.open(url, '_top');
+      console.log('oculaire: NAV - used window.open(_top)');
+      return true;
+    } catch(e){ console.warn('oculaire: window.open failed', e); }
+
+    try {
+      window.location.href = url;
+      console.log('oculaire: NAV - used window.location.href (iframe)');
+      return true;
+    } catch(e){ console.warn('oculaire: window.location fallback failed', e); }
+
+    return false;
+  }
+
+  const ok = tryAssignHref(urlStr);
+  if (!ok) {
+    // last resort: set search on top (may throw)
+    try {
+      window.top.location.search = '?open_chat=1&question=' + encodeURIComponent(q);
+      console.log('oculaire: NAV - used top.location.search fallback');
+    } catch (e) {
+      try {
+        window.location.search = '?open_chat=1&question=' + encodeURIComponent(q);
+        console.log('oculaire: NAV - used location.search fallback');
+      } catch (e2) {
+        console.error('oculaire: NAV - all navigation attempts failed', e2);
+        alert('Navigation blocked by browser/host. Try opening the app in a new tab or disable extensions that block navigation.');
+      }
+    }
+  }
+});
+
 
 # render with enough height to avoid clipping
 components.html(floating_html, height=320)
