@@ -1,4 +1,4 @@
-# app.py - OCULAIRE (updated header: neon-green glowing title, no logo)
+# app.py - OCULAIRE Neon Lab (updated header placement + neon green title)
 import streamlit as st
 import numpy as np
 import joblib
@@ -23,14 +23,14 @@ except Exception:
     USE_SDK = False
 
 # -----------------------
-# Page Config (do this before writing markup)
+# Page Config (MUST be first Streamlit UI call)
 # -----------------------
 st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    layout="wide",
                    page_icon="👁️")
 
 # -----------------------
-# Header (neon-green glowing title, no logo)
+# Neon green animated header (placed after set_page_config)
 # -----------------------
 st.markdown("""
 <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;margin-top:22px;margin-bottom:18px;">
@@ -138,7 +138,7 @@ st.markdown("""
   --muted:#a4b1c9;
 }
 
-/* override Streamlit sizing so our severity bar can span the page */
+/* allow wider layout for neon bars */
 .block-container {
   max-width: 98% !important;
   padding-left: 1rem !important;
@@ -162,7 +162,9 @@ st.markdown("""
 .metric-label { color:var(--muted); font-size:12px; }
 .large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.5); }
 
-/* Severity bar */
+/* ===========================================
+   SEVERITY BAR (FULL WIDTH + NEON BEAT)
+   =========================================== */
 .sev-wrap {
   margin-top: 18px;
   width: 100%;
@@ -197,6 +199,7 @@ st.markdown("""
   100% { transform: scaleX(1) }
 }
 
+/* Chip (percentage) */
 .sev-chip {
   margin-top: 10px;
   padding: 8px 16px;
@@ -214,7 +217,7 @@ st.markdown("""
   100% { transform: translateY(0) scale(1) }
 }
 
-/* chat & expander neon visuals */
+/* chat & expander styles */
 .user-msg {
   background: linear-gradient(135deg, rgba(0,245,255,0.15), rgba(0,245,255,0.05));
   border-left: 3px solid var(--neonA);
@@ -630,7 +633,7 @@ with colB:
 threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
 # -----------------------
-# Analysis logic (unchanged except it uses rnflt_arr / bscan_file or bscan_npz_file)
+# Analysis logic
 # -----------------------
 if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_file is not None) or (bscan_npz_file is not None)):
     figs = []
@@ -639,7 +642,6 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
 
     # RNFLT Processing
     if 'rnflt_arr' in locals() and rnflt_arr is not None:
-        # if we have metrics from earlier
         try:
             metrics = rnflt_metrics
             X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
@@ -677,7 +679,7 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
         except Exception as e:
             st.error(f"Error in RNFLT section: {e}")
 
-    # RNFLT NPZ uploader fallback (older code path)
+    # RNFLT NPZ uploader fallback
     if rnflt_file and ('rnflt_arr' not in locals() or rnflt_arr is None):
         if scaler is not None:
             rnflt, metrics = process_npz(rnflt_file)
@@ -709,13 +711,11 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
                 st.pyplot(fig)
                 figs.append(fig)
 
-    # B-Scan Processing
-    # If user uploaded an NPZ for B-scan (sequence), take first slice as representative
+    # B-Scan Processing - NPZ
     if 'bscan_npz_file' in locals() and bscan_npz_file is not None:
         try:
             bscan_vol, _ = process_npz(bscan_npz_file)
             if bscan_vol is not None:
-                # bscan_vol already flattened to 2D by process_npz if 3D
                 image_pil = Image.fromarray(np.uint8(255 * (bscan_vol - np.nanmin(bscan_vol)) / (np.nanmax(bscan_vol) - np.nanmin(bscan_vol) + 1e-9)))
                 batch, proc = preprocess_bscan(image_pil)
                 if b_model is not None:
@@ -820,7 +820,6 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
                         st.download_button(f"Download run {rid}", data=pdfb, file_name=f"oculaire_run_{rid}.pdf", mime="application/pdf")
             with cols[2]:
                 if st.button(f"🗑️ Delete #{rid}", key=f"del_{rid}"):
-                    # quick delete (not implemented fully) — simple UX: inform user to clear DB manually for now
                     st.warning("Delete not implemented in this demo. To remove rows, delete oculaire_runs.db or run cleanup script.")
     else:
         st.info("No saved runs yet. Save a run after analysis using the 'Save run to history' button.")
