@@ -24,21 +24,9 @@ except Exception:
 # -----------------------
 # Page Config
 # -----------------------
-import base64
-
-def _get_header_img_data(path="assets/eye_reversed.png"):
-    try:
-        with open(path, "rb") as f:
-            return "data:image/png;base64," + base64.b64encode(f.read()).decode("utf-8")
-    except Exception:
-        # fallback to public SVG if local asset missing
-        return "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/Human_eye_icon.svg/1024px-Human_eye_icon.svg.png"
-
-img_data_uri = _get_header_img_data()
-
-st.markdown(f"""
-<div class="header" style="display:flex;flex-direction:column;align-items:center;justify-content:center;margin-top:20px;margin-bottom:20px; animation: fadeIn 1.2s ease-out;">
-  <img src="{img_data_uri}" width="90" style="filter: drop-shadow(0 0 12px rgba(0,245,255,0.6)); margin-bottom:10px; transform: scaleX(-1);" />
+st.markdown("""
+<div class="header" style="text-align:center; margin-top:20px; margin-bottom:20px; animation: fadeIn 1.2s ease-out;">
+  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/Human_eye_icon.svg/1024px-Human_eye_icon.svg.png" width="90" style="filter: drop-shadow(0 0 12px rgba(0,245,255,0.6)); margin-bottom:10px;" />
   <h1 style="font-size:56px; font-weight:900; letter-spacing:4px; background: linear-gradient(90deg, #00f5ff, #ff40c4); -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-shadow: 0 0 35px rgba(0,245,255,0.9), 0 0 45px rgba(255,64,196,0.8); animation: glowPulse 2.5s infinite ease-in-out;">
     OCULAIRE
   </h1>
@@ -58,7 +46,6 @@ st.markdown(f"""
 }
 </style>
 """, unsafe_allow_html=True)
-
 
 # -----------------------
 st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
