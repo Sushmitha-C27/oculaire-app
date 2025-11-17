@@ -1,4 +1,6 @@
-# app.py — OCULAIRE Neon Lab v5 (severity bar updated: longer + faster beat)
+# app.py — OCULAIRE Neon Lab v5 (FULL updated: severity bar full-width + neon beat)
+# Run: streamlit run app.py
+
 import streamlit as st
 import numpy as np
 import joblib
@@ -9,14 +11,15 @@ import cv2
 import io
 from matplotlib.backends.backend_pdf import PdfPages
 import os
+import requests
+import json
+import time
 
 # Try to import google.generativeai, fallback to requests
 try:
     import google.generativeai as genai
     USE_SDK = True
 except Exception:
-    import requests
-    import json
     USE_SDK = False
 
 # -----------------------
@@ -27,17 +30,15 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    page_icon="👁️")
 
 # -----------------------
-# Initialize Session State for Chat
+# Session State
 # -----------------------
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
-
-# optional guard to avoid double-processing if using URL-nav approach elsewhere
 if 'last_processed_q' not in st.session_state:
-    st.session_state['last_processed_q'] = None
+    st.session_state.last_processed_q = None
 
 # -----------------------
-# Get API key from Streamlit secrets or environment variable
+# API Key helper
 # -----------------------
 def get_api_key():
     try:
@@ -52,7 +53,7 @@ def get_api_key():
 API_KEY = get_api_key()
 
 # -----------------------
-# Neon Matplotlib Config
+# Matplotlib / Theme
 # -----------------------
 plt.style.use('dark_background')
 plt.rcParams.update({
@@ -68,20 +69,37 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — Neon Theme + faster-beating severity bar
+# CSS — full-width patch + neon severity bar + other styles
 # -----------------------
 st.markdown("""
 <style>
-:root{
+:root {
+  --bg:#020208;
+  --panel:#0a0f25;
   --neonA:#00f5ff;
   --neonB:#ff40c4;
   --muted:#a4b1c9;
 }
 
+/* ------------------------------------------------------------------
+   CRITICAL: override Streamlit's block-container sizing so our
+   severity bar can span the page. This lets .sev-outer be full width.
+   ------------------------------------------------------------------ */
+.block-container {
+  max-width: 98% !important;
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
+}
+
 /* general app */
-.stApp { background: radial-gradient(circle at 20% 20%, #091133, #020208 90%); color:#e6faff; font-family: 'Plus Jakarta Sans', Inter, system-ui; }
+.stApp {
+  background: radial-gradient(circle at 20% 20%, #091133, #020208 90%);
+  color: #e6faff;
+  font-family: 'Plus Jakarta Sans', Inter, system-ui;
+}
 .header { text-align:center; margin-top:10px; margin-bottom:10px; }
-.header h1 { font-size:42px; font-weight:900; letter-spacing:3px;
+.header h1 {
+  font-size:42px; font-weight:900; letter-spacing:3px;
   background: linear-gradient(90deg, var(--neonA), var(--neonB));
   -webkit-background-clip:text; -webkit-text-fill-color:transparent;
   text-shadow: 0 0 20px rgba(0,245,255,0.8), 0 0 35px rgba(255,64,196,0.5);
@@ -89,84 +107,123 @@ st.markdown("""
 .header h3 { color:var(--muted); font-weight:400; font-size:15px; }
 
 /* card */
-.card { background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); border:1px solid rgba(255,255,255,0.05); border-radius:12px; padding:16px; }
+.card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  border:1px solid rgba(255,255,255,0.05);
+  box-shadow: 0 0 25px rgba(0,245,255,0.05), 0 0 35px rgba(255,64,196,0.05);
+  border-radius:12px; padding:16px;
+}
 .metric-label { color:var(--muted); font-size:12px; }
 .large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.5); }
 
-/* severity - UPDATED: longer bar and faster beat */
-.sev-wrap { margin-top:18px; display:flex; justify-content:center; align-items:center; gap:12px; flex-direction:column; }
+/* ===========================================
+   SEVERITY BAR (FULL WIDTH + NEON BEAT)
+   =========================================== */
+.sev-wrap {
+  margin-top: 18px;
+  width: 100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-direction:column;
+}
 .sev-outer {
-  height: 24px;               /* slightly taller */
-  width: 80%;                 /* LONG bar across page */
-  min-width: 420px;           /* ensure visible on wide screens */
-  max-width: 1100px;
+  height: 26px;
+  width: 100% !important;         /* allow full-page width via .block-container override */
   background: rgba(255,255,255,0.03);
-  border-radius: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.05);
   overflow: hidden;
-  border: 1px solid rgba(255,255,255,0.04);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+  min-width: 280px;
+  max-width: 1400px;
 }
 .sev-inner {
   height: 100%;
   width: 0%;
   background: linear-gradient(90deg, var(--neonA), var(--neonB));
-  border-radius: 16px;
-  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5);
-  transition: width 0.9s cubic-bezier(.22,.9,.04,1); /* faster */
-  animation: sev-pulse 0.9s infinite ease-in-out;    /* faster beat */
+  border-radius: 18px;
+  transition: width 0.9s cubic-bezier(.22,.9,.04,1);
+  animation: sev-beat 0.9s infinite ease-in-out;
+  box-shadow: 0 0 35px rgba(0,245,255,0.7), 0 0 45px rgba(255,64,196,0.6);
   transform-origin: left center;
 }
-
-/* pulsing chip displayed on top of bar */
-.sev-chip {
-  display:inline-block;
-  padding:8px 14px;
-  border-radius:18px;
-  font-weight:900;
-  font-size:14px;
-  color:#021617;
-  background: linear-gradient(90deg, rgba(0,245,255,0.98), rgba(255,64,196,0.98));
-  box-shadow: 0 6px 30px rgba(0,245,255,0.25), 0 6px 30px rgba(255,64,196,0.18);
-  animation: chip-beat 0.9s infinite ease-in-out;   /* sync with inner */
+@keyframes sev-beat {
+  0% { transform: scaleX(1) }
+  50% { transform: scaleX(1.02) }
+  100% { transform: scaleX(1) }
 }
 
-/* faster keyframes */
-@keyframes sev-pulse {
-  0%   { transform: scaleX(1) translateZ(0); filter: drop-shadow(0 0 8px rgba(0,245,255,0.35)); }
-  50%  { transform: scaleX(1.01) translateZ(0); filter: drop-shadow(0 0 18px rgba(0,245,255,0.55)); }
-  100% { transform: scaleX(1) translateZ(0); filter: drop-shadow(0 0 8px rgba(0,245,255,0.35)); }
+/* Chip (percentage) — floats below center by default */
+.sev-chip {
+  margin-top: 10px;
+  padding: 8px 16px;
+  font-size: 15px;
+  font-weight: 900;
+  border-radius: 20px;
+  background: linear-gradient(90deg, var(--neonA), var(--neonB));
+  color: #021617;
+  box-shadow: 0 6px 30px rgba(0,245,255,0.25), 0 6px 30px rgba(255,64,196,0.18);
+  animation: chip-beat 0.9s infinite ease-in-out;
 }
 @keyframes chip-beat {
-  0% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-4px) scale(1.02); }
-  100% { transform: translateY(0) scale(1); }
+  0% { transform: translateY(0) scale(1) }
+  50% { transform: translateY(-4px) scale(1.02) }
+  100% { transform: translateY(0) scale(1) }
 }
 
-/* center alignment helpers */
-.sev-container {
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  width:100%;
-}
-
-/* responsive smaller screens */
+/* small screens adjustments */
 @media (max-width: 700px) {
-  .sev-outer { width: 92%; min-width: unset; }
-  .sev-chip { font-size:13px; padding:7px 12px; }
+  .sev-outer { width: 92% !important; max-width: 720px; }
+  .sev-chip { font-size: 13px; padding: 7px 12px; }
 }
 
-/* other app styles (kept) */
-.user-msg{background: linear-gradient(135deg, rgba(0,245,255,0.15), rgba(0,245,255,0.05));padding:12px;border-radius:8px;margin:8px 0;border-left:3px solid var(--neonA);}
-.assistant-msg{background: linear-gradient(135deg, rgba(255,64,196,0.15), rgba(255,64,196,0.05));padding:12px;border-radius:8px;margin:8px 0;border-left:3px solid var(--neonB);}
+/* chat & expander styles (kept neon-friendly) */
+.user-msg {
+  background: linear-gradient(135deg, rgba(0,245,255,0.15), rgba(0,245,255,0.05));
+  border-left: 3px solid var(--neonA);
+  padding: 12px;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.assistant-msg {
+  background: linear-gradient(135deg, rgba(255,64,196,0.15), rgba(255,64,196,0.05));
+  border-left: 3px solid var(--neonB);
+  padding: 12px;
+  border-radius: 8px;
+  margin: 8px 0;
+}
 
-/* hide streamlit footer (optional) */
-footer { visibility: hidden; }
+/* floating expander neon visuals */
+.floating-expander details {
+  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
+  border: 2px solid rgba(0,245,255,0.35) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+.floating-expander details summary {
+  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
+  padding: 12px !important;
+  border-radius: 12px !important;
+  font-weight: 800 !important;
+  font-size: 16px !important;
+  color: #e6faff !important;
+  display:flex !important;
+  align-items:center !important;
+  gap:8px !important;
+}
+.floating-expander details summary::before {
+  content: "💬";
+  font-size: 22px;
+  margin-right:8px;
+}
+
+/* hide footer */
+footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
 
 # -----------------------
-# Model name (if you want to change)
+# Model selectors / name
 # -----------------------
 MODEL_NAME = "models/gemini-2.5-pro"
 
@@ -189,7 +246,6 @@ Your role:
 - Always include a brief disclaimer that you're providing educational information, not medical advice
 
 Important: Always remind users to consult healthcare professionals for medical decisions."""
-
     try:
         if USE_SDK:
             genai.configure(api_key=api_key)
@@ -227,10 +283,10 @@ Important: Always remind users to consult healthcare professionals for medical d
             else:
                 return f"❌ Error ({response.status_code}): {response.text[:200]}"
     except Exception as e:
-        return f"❌ Error: {str(e)}\n\nTip: Make sure your API key from https://aistudio.google.com/apikey is unrestricted."
+        return f"❌ Error: {str(e)}"
 
 # -----------------------
-# Header
+# Header markup
 # -----------------------
 st.markdown("""
 <div class="header">
@@ -241,7 +297,7 @@ st.markdown("""
 st.markdown("---")
 
 # -----------------------
-# Load Models
+# Load Models (cache)
 # -----------------------
 @st.cache_resource
 def load_models():
@@ -262,7 +318,7 @@ def load_models():
 b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models()
 
 # -----------------------
-# Helpers (process, gradcam, render)
+# Helpers (processing)
 # -----------------------
 def process_npz(f):
     try:
@@ -335,35 +391,27 @@ def create_pdf(figs):
     return buf.getvalue()
 
 # -----------------------
-# render_severity (updated to use larger, centered bar + JS sets width quickly)
+# Severity renderer (HTML + JS sets width)
 # -----------------------
 def render_severity(pct):
     pct = max(0.0, min(100.0, float(pct)))
     html = f"""
     <div class='sev-wrap'>
-      <div class='sev-container'>
-        <div class='sev-outer'><div id='sev_inner' class='sev-inner'></div></div>
-      </div>
-      <div style='text-align:center'>
-        <div class='sev-chip'>{pct:.1f}%</div>
-      </div>
+      <div class='sev-outer'><div id='sev_inner' class='sev-inner'></div></div>
+      <div class='sev-chip'>{pct:.1f}%</div>
     </div>
     <script>
-      // set width and animate
-      (function(){{
+      // small delay to ensure layout ready, then set width
+      setTimeout(function(){{
         var el = document.getElementById('sev_inner');
-        if (!el) return;
-        // small delay so CSS & layout settle
-        setTimeout(function(){{
-          el.style.width = '{pct:.1f}%';
-        }}, 50);
-      }})();
+        if (el) el.style.width = '{pct:.1f}%';
+      }}, 60);
     </script>
     """
     return html
 
 # -----------------------
-# SIDEBAR - API Key Status
+# Sidebar (API status + instructions)
 # -----------------------
 with st.sidebar:
     st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
@@ -386,16 +434,11 @@ with st.sidebar:
     2. Add: <code>GEMINI_API_KEY = "your-key-here"</code><br>
     3. Or set environment variable:<br>
     <code>export GEMINI_API_KEY="your-key-here"</code><br><br>
-    <strong>Get FREE API key:</strong><br>
-    1. Visit <a href='https://aistudio.google.com/apikey' target='_blank'>Google AI Studio</a><br>
-    2. Click "Get API Key"<br>
-    3. Copy your key<br><br>
-    <strong>✨ Gemini is FREE with generous limits!</strong>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------
-# UI LAYOUT (RNFLT / B-Scan upload)
+# Main UI layout (uploads)
 # -----------------------
 colA, colB = st.columns(2)
 with colA:
@@ -403,6 +446,7 @@ with colA:
     st.subheader("🩺 RNFLT Map Analysis (.npz)")
     rnflt_file = st.file_uploader("Upload RNFLT file", type=["npz"])
     st.markdown("</div>", unsafe_allow_html=True)
+
 with colB:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("👁️ B-Scan Slice Analysis (Image)")
@@ -412,7 +456,7 @@ with colB:
 threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
 # -----------------------
-# ANALYSIS
+# Analysis logic (unchanged)
 # -----------------------
 if rnflt_file or bscan_file:
     figs = []
@@ -435,6 +479,7 @@ if rnflt_file or bscan_file:
             m3.markdown(f"<div class='metric-label'>Std Dev</div><div class='large-metric'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
             m4.markdown(f"<div class='metric-label'>Cluster</div><div class='large-metric'>{cluster}</div>", unsafe_allow_html=True)
             st.markdown(render_severity(sev), unsafe_allow_html=True)
+
             fig, axes = plt.subplots(1,3,figsize=(18,6),constrained_layout=True)
             im0=axes[0].imshow(rnflt,cmap='turbo');axes[0].axis('off');axes[0].set_title("Uploaded RNFLT")
             plt.colorbar(im0,ax=axes[0],shrink=0.85)
@@ -450,15 +495,23 @@ if rnflt_file or bscan_file:
     if bscan_file and b_model is not None:
         image_pil = Image.open(bscan_file).convert("L")
         batch, proc = preprocess_bscan(image_pil)
-        pred_raw = b_model.predict(batch, verbose=0)[0][0]
-        label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
-        conf = pred_raw*100 if label_b=="Glaucoma-like" else (1-pred_raw)*100
+        try:
+            pred_raw = b_model.predict(batch, verbose=0)[0][0]
+            label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
+            conf = pred_raw*100 if label_b=="Glaucoma-like" else (1-pred_raw)*100
+        except Exception:
+            pred_raw = 0.0
+            label_b = "Unknown"
+            conf = 0.0
+
         severity_overall = max(severity_overall, conf)
+
         st.markdown("<hr>", unsafe_allow_html=True)
         m1, m2 = st.columns(2)
         m1.markdown(f"<div class='metric-label'>CNN Prediction</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
         m2.markdown(f"<div class='metric-label'>Confidence</div><div class='large-metric'>{conf:.2f}%</div>", unsafe_allow_html=True)
         st.markdown(render_severity(conf), unsafe_allow_html=True)
+
         heat = gradcam(batch, b_model)
         if heat is not None:
             heat_r = cv2.resize(heat, (224,224))
@@ -473,7 +526,7 @@ if rnflt_file or bscan_file:
     st.markdown(f"<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
     st.markdown(render_severity(severity_overall), unsafe_allow_html=True)
 
-    # Download buttons
+    # Downloads
     if figs:
         png_bytes = fig_to_png(figs[0])
         pdf_bytes = create_pdf(figs)
@@ -486,24 +539,26 @@ st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING CHAT EXPANDER — label changed to "💬 Ask AI assistant"
+# Floating expander (Streamlit-only UI) — behaves like expander but neon
 # -----------------------
 st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
 with st.expander("💬 Ask AI assistant", expanded=False):
     st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:12px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
 
-    # Display chat history
+    # display chat history
     for msg in st.session_state.chat_history:
         if msg["role"] == "user":
             st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
         else:
             st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
 
-    # Input area
-    user_question = st.text_input("Your question:", key="chat_input", placeholder="e.g., What is glaucoma? How does OCT detect it?", label_visibility="collapsed", help="Type your glaucoma or OCT question here")
+    # input area
+    user_question = st.text_input("Your question:", key="chat_input",
+                                  placeholder="e.g., What is glaucoma? How does OCT detect it?",
+                                  label_visibility="collapsed", help="Type your glaucoma or OCT question here")
 
-    col1, col2 = st.columns([4, 1])
+    col1, col2 = st.columns([4,1])
     with col1:
         send_btn = st.button("📤 Send", use_container_width=True)
     with col2:
@@ -514,13 +569,30 @@ with st.expander("💬 Ask AI assistant", expanded=False):
             st.error("❌ API key not configured. See sidebar.")
         else:
             with st.spinner("🔍 Searching for answers..."):
-                response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
+                # append user query and call assistant
                 st.session_state.chat_history.append({"role": "user", "content": user_question})
-                st.session_state.chat_history.append({"role": "assistant", "content": response})
-                st.rerun()
+                reply = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
+                st.session_state.chat_history.append({"role": "assistant", "content": reply})
+            # rerun to show updated conversation
+            try:
+                st.experimental_rerun()
+            except Exception:
+                # older/newer streamlit may use st.rerun() — attempt that fallback
+                try:
+                    st.rerun()
+                except Exception:
+                    pass
 
     if clear_btn:
         st.session_state.chat_history = []
-        st.rerun()
+        try:
+            st.experimental_rerun()
+        except Exception:
+            try:
+                st.rerun()
+            except Exception:
+                pass
 
 st.markdown('</div>', unsafe_allow_html=True)
+
+# End of file
