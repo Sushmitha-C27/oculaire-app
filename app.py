@@ -1,4 +1,4 @@
-# app.py (updated: neon-blue theme + NameError fix)
+# app.py (updated — report/clinical text color set to neon blue)
 import streamlit as st
 import numpy as np
 import joblib
@@ -69,7 +69,7 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — neon-blue palette
+# CSS — neon-blue palette + readable report text (changed to neon blue)
 # -----------------------
 st.markdown("""
 <style>
@@ -80,6 +80,7 @@ st.markdown("""
   --neonB:#0066ff;   /* deep neon blue */
   --muted:#9edfff;   /* readable cyan-muted */
   --accent:#7fd2ff;
+  --report-blue: #00bfff; /* explicit report blue */
 }
 
 /* block container sizing */
@@ -165,8 +166,15 @@ st.markdown("""
 
 /* report text contrast override - ensure clear blue text where necessary */
 .report-text, .clinical-interpretation {
-  color: #cfefff !important;
-  font-weight:500;
+  color: var(--report-blue) !important;
+  font-weight:600;
+  text-shadow: 0 0 6px rgba(0,191,255,0.15);
+}
+
+/* stronger contrast for headings in the report area */
+.report-heading {
+  color: var(--neonB) !important;
+  font-weight:900;
 }
 
 /* hide default footer */
