@@ -148,80 +148,7 @@ st.markdown("""
   text-shadow: 0 0 20px rgba(0,245,255,0.3);
 }
 
-/* Floating Chat Bubble */
-.chat-bubble {
-  position: fixed;
-  bottom: 30px;
-  right: 30px;
-  width: 70px;
-  height: 70px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--neonA), var(--neonB));
-  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-  z-index: 9999;
-  animation: float 3s ease-in-out infinite, glow 2s ease-in-out infinite;
-  transition: transform 0.3s ease;
-}
-.chat-bubble:hover {
-  transform: scale(1.1);
-  box-shadow: 0 0 40px rgba(0,245,255,0.8), 0 0 50px rgba(255,64,196,0.7);
-}
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
-}
-@keyframes glow {
-  0%, 100% { box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5); }
-  50% { box-shadow: 0 0 40px rgba(0,245,255,0.9), 0 0 60px rgba(255,64,196,0.8); }
-}
-
-/* Fixed button container */
-.floating-expander {
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 20px !important;
-  width: 400px !important;
-  z-index: 9999 !important;
-  box-shadow: 0 0 40px rgba(0,245,255,0.4), 0 0 60px rgba(255,64,196,0.3) !important;
-  border-radius: 16px !important;
-  animation: float 3s ease-in-out infinite !important;
-}
-
-/* Style the expander */
-.floating-expander details {
-  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
-  border: 2px solid rgba(0,245,255,0.3) !important;
-  border-radius: 16px !important;
-}
-
-.floating-expander details summary {
-  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
-  padding: 16px !important;
-  border-radius: 14px !important;
-  cursor: pointer !important;
-  font-weight: 800 !important;
-  font-size: 16px !important;
-  color: #e6faff !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-}
-
-.floating-expander details summary:hover {
-  background: linear-gradient(135deg, rgba(0,245,255,0.3), rgba(255,64,196,0.3)) !important;
-  box-shadow: 0 0 25px rgba(0,245,255,0.5) !important;
-}
-
-.floating-expander details[open] {
-  box-shadow: 0 0 50px rgba(0,245,255,0.6), 0 0 70px rgba(255,64,196,0.4) !important;
-}
-
-/* Floating Chat Expander at Bottom */
+/* Floating Chat Expander at Bottom - NEON BEATING VERSION */
 .floating-expander {
   position: fixed !important;
   bottom: 20px !important;
@@ -237,10 +164,86 @@ st.markdown("""
   50% { transform: translateY(-8px); }
 }
 
+/* Neon beating animation for expander */
+@keyframes neon-beat {
+  0%, 100% { 
+    box-shadow: 0 0 30px rgba(0,245,255,0.4), 0 0 50px rgba(255,64,196,0.3),
+                0 0 70px rgba(0,245,255,0.2), 0 0 90px rgba(255,64,196,0.2);
+    border-color: rgba(0,245,255,0.5);
+  }
+  50% { 
+    box-shadow: 0 0 50px rgba(0,245,255,0.8), 0 0 80px rgba(255,64,196,0.6),
+                0 0 110px rgba(0,245,255,0.4), 0 0 140px rgba(255,64,196,0.4);
+    border-color: rgba(255,64,196,0.8);
+  }
+}
+
+@keyframes neon-glow-text {
+  0%, 100% { 
+    text-shadow: 0 0 10px rgba(0,245,255,0.8), 0 0 20px rgba(255,64,196,0.6);
+  }
+  50% { 
+    text-shadow: 0 0 20px rgba(0,245,255,1), 0 0 30px rgba(255,64,196,0.9),
+                 0 0 40px rgba(0,245,255,0.7);
+  }
+}
+
+/* Style the expander with beating neon effect */
+.floating-expander details {
+  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
+  border: 2px solid rgba(0,245,255,0.5) !important;
+  border-radius: 16px !important;
+  animation: neon-beat 2s ease-in-out infinite !important;
+}
+
+.floating-expander details summary {
+  background: linear-gradient(135deg, rgba(0,245,255,0.25), rgba(255,64,196,0.25)) !important;
+  padding: 16px !important;
+  border-radius: 14px !important;
+  cursor: pointer !important;
+  font-weight: 800 !important;
+  font-size: 18px !important;
+  color: #e6faff !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  animation: neon-glow-text 2s ease-in-out infinite !important;
+  transition: all 0.3s ease !important;
+}
+
+.floating-expander details summary:hover {
+  background: linear-gradient(135deg, rgba(0,245,255,0.4), rgba(255,64,196,0.4)) !important;
+  box-shadow: 0 0 35px rgba(0,245,255,0.7), 0 0 50px rgba(255,64,196,0.6) !important;
+  transform: scale(1.02) !important;
+}
+
+.floating-expander details[open] {
+  animation: neon-beat 1.5s ease-in-out infinite !important;
+  box-shadow: 0 0 60px rgba(0,245,255,0.8), 0 0 90px rgba(255,64,196,0.6) !important;
+}
+
+.floating-expander details[open] summary {
+  background: linear-gradient(135deg, rgba(0,245,255,0.35), rgba(255,64,196,0.35)) !important;
+  border-bottom: 2px solid rgba(0,245,255,0.4) !important;
+  margin-bottom: 12px !important;
+}
+
+/* Pulsing icon animation */
+@keyframes pulse-icon {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.85; }
+}
+
+.floating-expander details summary::before {
+  content: "💬";
+  font-size: 24px;
+  animation: pulse-icon 2s ease-in-out infinite;
+}
+
 footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
-MODEL_NAME = "models/gemini-2.5-pro"
+MODEL_NAME = "models/gemini-2.0-flash-exp"
 # -----------------------
 # Chatbot Function
 # -----------------------
@@ -288,7 +291,7 @@ Important: Always remind users to consult healthcare professionals for medical d
             
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
             
-            url = "https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
             
             response = requests.post(
                 url,
@@ -473,13 +476,6 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING CHAT BUTTON (Bottom-right corner)
-# -----------------------
-# The button needs to be at the end of the page to appear at bottom
-
-# We'll place it after all content
-
-# -----------------------
 # LAYOUT
 # -----------------------
 colA, colB = st.columns(2)
@@ -576,10 +572,10 @@ st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING CHAT EXPANDER (Bottom-right corner)
+# FLOATING CHAT EXPANDER (Bottom-right corner) - WITH NEON BEATING EFFECT
 # -----------------------
 st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
-with st.expander("💬 Ask Glaucoma Assistant", expanded=False):
+with st.expander("Ask Glaucoma Assistant", expanded=False):
     st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:15px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
     
