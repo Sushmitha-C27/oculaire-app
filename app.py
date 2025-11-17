@@ -1,4 +1,4 @@
-# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (fixed session_state + working bubble)
+# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot
 import streamlit as st
 import numpy as np
 import joblib
@@ -27,15 +27,10 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    page_icon="👁️")
 
 # -----------------------
-# Initialize Session State for Chat (prevent AttributeError)
+# Initialize Session State for Chat
 # -----------------------
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
-# <-- FIX: create chat_open and chat_input defaults to avoid AttributeError
-if 'chat_open' not in st.session_state:
-    st.session_state.chat_open = False
-if 'chat_input' not in st.session_state:
-    st.session_state.chat_input = ""
 
 # Get API key from Streamlit secrets or environment variable
 # Priority: Streamlit secrets > Environment variable > User input
@@ -185,22 +180,62 @@ st.markdown("""
   50% { box-shadow: 0 0 40px rgba(0,245,255,0.9), 0 0 60px rgba(255,64,196,0.8); }
 }
 
-/* Floating Chat Pill (text) */
-.floating-chat-pill {
-  position: fixed;
-  bottom: 36px;
-  right: 110px;
-  z-index: 9999;
-  background: linear-gradient(135deg, rgba(0,245,255,0.08), rgba(255,64,196,0.06));
-  padding: 12px 18px;
-  border-radius: 30px;
-  color: #e6faff;
-  font-weight: 800;
-  cursor: pointer;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.4);
-  transition: transform 0.12s ease;
+/* Fixed button container */
+.floating-expander {
+  position: fixed !important;
+  bottom: 20px !important;
+  right: 20px !important;
+  width: 400px !important;
+  z-index: 9999 !important;
+  box-shadow: 0 0 40px rgba(0,245,255,0.4), 0 0 60px rgba(255,64,196,0.3) !important;
+  border-radius: 16px !important;
+  animation: float 3s ease-in-out infinite !important;
 }
-.floating-chat-pill:hover { transform: translateY(-4px); }
+
+/* Style the expander */
+.floating-expander details {
+  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
+  border: 2px solid rgba(0,245,255,0.3) !important;
+  border-radius: 16px !important;
+}
+
+.floating-expander details summary {
+  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
+  padding: 16px !important;
+  border-radius: 14px !important;
+  cursor: pointer !important;
+  font-weight: 800 !important;
+  font-size: 16px !important;
+  color: #e6faff !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.floating-expander details summary:hover {
+  background: linear-gradient(135deg, rgba(0,245,255,0.3), rgba(255,64,196,0.3)) !important;
+  box-shadow: 0 0 25px rgba(0,245,255,0.5) !important;
+}
+
+.floating-expander details[open] {
+  box-shadow: 0 0 50px rgba(0,245,255,0.6), 0 0 70px rgba(255,64,196,0.4) !important;
+}
+
+/* Floating Chat Expander at Bottom */
+.floating-expander {
+  position: fixed !important;
+  bottom: 20px !important;
+  right: 20px !important;
+  width: 450px !important;
+  max-width: 90vw !important;
+  z-index: 9999 !important;
+  animation: float 3s ease-in-out infinite !important;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
 
 footer { visibility:hidden; }
 </style>
@@ -438,74 +473,14 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING CHAT WIDGET (Bottom-right corner)
+# FLOATING CHAT BUTTON (Bottom-right corner)
 # -----------------------
-# Visible bubble + pill
-st.markdown('<div class="chat-bubble" id="chatBubble">🤖</div><div class="floating-chat-pill" id="chatPill">Ask Assistant</div>', unsafe_allow_html=True)
+# The button needs to be at the end of the page to appear at bottom
 
-# <-- FIX: create a hidden unique toggle button (JS will click this). This avoids fragile parent-document searches.
-_TOGGLE_UNIQUE_LABEL = "__OCULAIRE_TOGGLE_CHAT__"
-st.markdown('<div style="position:absolute;left:-9999px;top:-9999px;opacity:0;">', unsafe_allow_html=True)
-toggle_clicked = st.button(_TOGGLE_UNIQUE_LABEL, key="__oculaire_toggle_button__")
-st.markdown('</div>', unsafe_allow_html=True)
-
-# When hidden button clicked toggles chat_open
-if toggle_clicked:
-    st.session_state.chat_open = not st.session_state.chat_open
-    # rerun to update UI immediately
-    st.experimental_rerun()
-
-# JS to click the hidden button when user clicks the bubble/pill
-st.markdown(f"""
-<script>
-(function(){{
-  function clickHidden() {{
-    const targetLabel = "{_TOGGLE_UNIQUE_LABEL}";
-    // Search current document buttons first
-    const buttons = Array.from(document.querySelectorAll('button'));
-    for (let b of buttons) {{
-      if ((b.innerText || "").trim() === targetLabel) {{
-        b.click();
-        return true;
-      }}
-    }}
-    // try parent document (iframe scenarios)
-    try {{
-      if (window.parent && window.parent.document) {{
-        const pbtns = Array.from(window.parent.document.querySelectorAll('button'));
-        for (let b of pbtns) {{
-          if ((b.innerText || "").trim() === targetLabel) {{
-            b.click();
-            return true;
-          }}
-        }}
-      }}
-    }} catch(e) {{
-      // ignore cross-origin errors
-    }}
-    console.warn("Toggle button not found:", targetLabel);
-    return false;
-  }}
-
-  const bubble = document.getElementById('chatBubble');
-  const pill = document.getElementById('chatPill');
-  [bubble, pill].forEach(el => {{
-    if (!el) return;
-    el.style.cursor = 'pointer';
-    el.addEventListener('click', function(e) {{
-      e.preventDefault();
-      // tiny visual feedback
-      el.style.transform = 'scale(0.98)';
-      setTimeout(()=> el.style.transform = '', 120);
-      clickHidden();
-    }});
-  }});
-}})();
-</script>
-""", unsafe_allow_html=True)
+# We'll place it after all content
 
 # -----------------------
-# LAYOUT (uploads etc.)
+# LAYOUT
 # -----------------------
 colA, colB = st.columns(2)
 
@@ -524,7 +499,7 @@ with colB:
 threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
 # -----------------------
-# ANALYSIS (same as before)
+# ANALYSIS
 # -----------------------
 if rnflt_file or bscan_file:
     figs = []
@@ -601,42 +576,41 @@ st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# When chat is open, show in sidebar
+# FLOATING CHAT EXPANDER (Bottom-right corner)
 # -----------------------
-if st.session_state.chat_open:
-    with st.sidebar:
-        st.markdown("---")
-        st.markdown("<div class='chat-header'>🤖 Glaucoma Assistant</div>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:15px;'>Ask me anything about glaucoma!</p>", unsafe_allow_html=True)
-        
-        # Display chat history
-        for msg in st.session_state.chat_history:
-            if msg["role"] == "user":
-                st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-        
-        # Input area bound to session_state.chat_input
-        user_question = st.text_input("Your question:", key="chat_input", placeholder="What is glaucoma?")
-        
-        col1, col2, col3 = st.columns([3, 1, 1])
-        with col1:
-            if st.button("📤 Send", use_container_width=True):
-                if user_question and API_KEY:
-                    with st.spinner("🔍 Thinking..."):
-                        response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
-                        st.session_state.chat_history.append({"role": "user", "content": user_question})
-                        st.session_state.chat_history.append({"role": "assistant", "content": response})
-                        # clear input after send
-                        st.session_state.chat_input = ""
-                        st.experimental_rerun()
-                elif not API_KEY:
-                    st.error("❌ No API key")
-        with col2:
-            if st.button("🗑️", use_container_width=True):
-                st.session_state.chat_history = []
-                st.experimental_rerun()
-        with col3:
-            if st.button("✖️", use_container_width=True):
-                st.session_state.chat_open = False
-                st.experimental_rerun()
+st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
+with st.expander("💬 Ask Glaucoma Assistant", expanded=False):
+    st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:15px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
+    
+    # Display chat history
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+    
+    # Input area
+    user_question = st.text_input("Your question:", key="chat_input", placeholder="e.g., What is glaucoma? How does OCT detect it?", label_visibility="collapsed")
+    
+    col1, col2 = st.columns([4, 1])
+    with col1:
+        send_btn = st.button("📤 Send", use_container_width=True)
+    with col2:
+        clear_btn = st.button("🗑️", use_container_width=True)
+    
+    if send_btn and user_question:
+        if not API_KEY:
+            st.error("❌ API key not configured. See sidebar.")
+        else:
+            with st.spinner("🔍 Searching for answers..."):
+                response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
+                st.session_state.chat_history.append({"role": "user", "content": user_question})
+                st.session_state.chat_history.append({"role": "assistant", "content": response})
+                st.rerun()
+    
+    if clear_btn:
+        st.session_state.chat_history = []
+        st.rerun()
+
+st.markdown('</div>', unsafe_allow_html=True)
