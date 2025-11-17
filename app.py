@@ -1,4 +1,7 @@
-# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (updated floating bubble)
+# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (floating pill + overlay chat)
+# Save/replace your current app.py with this file.
+# Run: streamlit run app.py
+
 import streamlit as st
 import streamlit.components.v1 as components
 import numpy as np
@@ -12,12 +15,13 @@ from matplotlib.backends.backend_pdf import PdfPages
 import os
 import requests
 import json
+import time
 
 # Try to import google.generativeai, fallback to requests
 try:
     import google.generativeai as genai
     USE_SDK = True
-except ImportError:
+except Exception:
     USE_SDK = False
 
 # -----------------------
@@ -34,20 +38,14 @@ if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
 # Get API key from Streamlit secrets or environment variable
-# Priority: Streamlit secrets > Environment variable > User input
 def get_api_key():
-    # Try Streamlit secrets first (for deployment)
     try:
         return st.secrets["GEMINI_API_KEY"]
     except Exception:
         pass
-    
-    # Try environment variable (for local development)
     env_key = os.getenv("GEMINI_API_KEY")
     if env_key:
         return env_key
-    
-    # Return None if not found (user will need to input)
     return None
 
 API_KEY = get_api_key()
@@ -69,7 +67,7 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — Neon Theme + Animations
+# CSS — Neon Theme + Animations (keeps your styles)
 # -----------------------
 st.markdown("""
 <style>
@@ -169,20 +167,49 @@ st.markdown("""
   cursor:pointer;
   transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
-.bubble-pill:hover { transform: translateY(-6px) scale(1.02); box-shadow: 0 0 40px rgba(0,245,255,0.8); }
+.bubble-pill:hover { transform: scale(1.04); box-shadow: 0 0 40px rgba(0,245,255,0.8); }
 
-/* Floating small chat icon (round) - shown when collapsed */
-.bubble-icon {
-  width:64px;
-  height:64px;
-  border-radius:50%;
+/* Floating Chat Overlay (the actual widget) */
+.chat-overlay {
+  position: fixed;
+  bottom: 100px;
+  right: 24px;
+  width: 420px;
+  max-width: 92vw;
+  z-index: 10000;
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98));
+  border: 1px solid rgba(0,245,255,0.08);
+  box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+}
+.chat-overlay .header {
+  padding: 12px 16px;
   display:flex;
+  justify-content:space-between;
   align-items:center;
-  justify-content:center;
-  font-size:28px;
-  background: linear-gradient(135deg, var(--neonA), var(--neonB));
-  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5);
+}
+.chat-overlay .body {
+  padding: 12px 16px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.chat-overlay .footer {
+  padding: 12px 12px;
+  background: rgba(255,255,255,0.02);
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+.chat-overlay .input {
+  flex:1;
+}
+.close-btn {
+  background:none;
+  border:none;
+  color:var(--muted);
   cursor:pointer;
+  font-size:18px;
 }
 
 /* Ensure footer hidden */
@@ -195,11 +222,8 @@ footer { visibility:hidden; }
 # -----------------------
 def ask_glaucoma_assistant(question, history, api_key):
     """Call Google Gemini API with glaucoma-specific context"""
-    
     if not api_key or not api_key.strip():
         return "⚠️ Please configure your Google Gemini API key (see sidebar)."
-    
-    # System prompt
     system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
 
 Your role:
@@ -211,34 +235,24 @@ Your role:
 - Always include a brief disclaimer that you're providing educational information, not medical advice
 
 Important: Always remind users to consult healthcare professionals for medical decisions."""
-
     try:
         if USE_SDK:
-            # Use official Google AI SDK
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel('gemini-1.5-flash')
-            
-            # Build conversation
             chat_history = []
             for msg in history[-6:]:
                 role = "user" if msg["role"] == "user" else "model"
                 chat_history.append({"role": role, "parts": [msg["content"]]})
-            
             chat = model.start_chat(history=chat_history)
             response = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
             return response.text
-            
         else:
-            # Fallback to REST API
             conversation_context = ""
             for msg in history[-6:]:
                 role = "User" if msg["role"] == "user" else "Assistant"
                 conversation_context += f"{role}: {msg['content']}\n\n"
-            
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
-            
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
-            
             response = requests.post(
                 url,
                 headers={"Content-Type": "application/json"},
@@ -248,7 +262,6 @@ Important: Always remind users to consult healthcare professionals for medical d
                 },
                 timeout=30
             )
-            
             if response.status_code == 200:
                 data = response.json()
                 return data["candidates"][0]["content"]["parts"][0]["text"]
@@ -258,12 +271,11 @@ Important: Always remind users to consult healthcare professionals for medical d
                 return "❌ API not accessible. Your key might be restricted. Try creating a new unrestricted key."
             else:
                 return f"❌ Error ({response.status_code}): {response.text[:200]}"
-                
     except Exception as e:
         return f"❌ Error: {str(e)}\n\nTip: Make sure your API key from https://aistudio.google.com/apikey is unrestricted."
 
 # -----------------------
-# Header
+# Header (keeps your header)
 # -----------------------
 st.markdown("""
 <div class="header">
@@ -274,7 +286,7 @@ st.markdown("""
 st.markdown("---")
 
 # -----------------------
-# Load Models
+# Load Models (unchanged)
 # -----------------------
 @st.cache_resource
 def load_models():
@@ -295,7 +307,7 @@ def load_models():
 b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models()
 
 # -----------------------
-# Helpers
+# Helpers (unchanged)
 # -----------------------
 def process_npz(f):
     try:
@@ -384,45 +396,39 @@ def render_severity(pct):
     return html
 
 # -----------------------
-# SIDEBAR - API Key Status
+# SIDEBAR - API Key Status (unchanged)
 # -----------------------
 with st.sidebar:
     st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
-    
     if API_KEY:
         st.success("✅ Gemini API Key configured")
         st.info("Using API key from secrets/environment")
     else:
         st.error("❌ No API Key found")
         st.warning("Chatbot will not work without an API key")
-    
     st.markdown("---")
     st.markdown("""
     <div style='font-size:12px; color:var(--muted);'>
     <strong>How to configure Gemini API key:</strong><br><br>
-    
     <strong>For Streamlit Cloud:</strong><br>
     1. Go to your app settings<br>
     2. Add to Secrets:<br>
     <code>GEMINI_API_KEY = "your-key-here"</code><br><br>
-    
     <strong>For Local Development:</strong><br>
     1. Create <code>.streamlit/secrets.toml</code><br>
     2. Add: <code>GEMINI_API_KEY = "your-key-here"</code><br>
     3. Or set environment variable:<br>
     <code>export GEMINI_API_KEY="your-key-here"</code><br><br>
-    
     <strong>Get FREE API key:</strong><br>
     1. Visit <a href='https://aistudio.google.com/apikey' target='_blank'>Google AI Studio</a><br>
     2. Click "Get API Key"<br>
     3. Copy your key<br><br>
-    
     <strong>✨ Gemini is FREE with generous limits!</strong>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------
-# LAYOUT
+# LAYOUT (RNFLT / B-Scan upload UI is unchanged)
 # -----------------------
 colA, colB = st.columns(2)
 
@@ -441,7 +447,7 @@ with colB:
 threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
 # -----------------------
-# ANALYSIS
+# ANALYSIS (unchanged logic)
 # -----------------------
 if rnflt_file or bscan_file:
     figs = []
@@ -518,79 +524,119 @@ st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING BUBBLE (Bottom-right) + Query-param driven expander open
+# FLOATING PILL + CHAT OVERLAY (query-param driven)
+# - click pill -> sets open_chat=1 and reloads
+# - app reads open_chat and renders overlay (Streamlit native UI) when true
+# - closing/clearing will remove query params (st.experimental_set_query_params())
 # -----------------------
-# Mechanism:
-# - Clicking the bubble sets ?open_chat=1 in URL and reloads page
-# - Streamlit reads the query param and opens the chat expander automatically
-# - After sending/clearing the chat, we clear the query param so the bubble collapses again
 
-# Check query params to decide whether to expand chat
+# Read query params to know whether to show overlay
 query_params = st.experimental_get_query_params()
 open_chat = False
-if "open_chat" in query_params and query_params.get("open_chat", ["0"])[0] in ("1", "true", "True"):
+if "open_chat" in query_params and query_params.get("open_chat", ["0"])[0].lower() in ("1", "true", "yes"):
     open_chat = True
 
-# Render a clickable floating bubble using a tiny HTML widget
-bubble_html = f"""
+# Render the floating pill (clicking it will set open_chat=1 in URL and reload)
+pill_html = """
 <div class="floating-bubble">
-  <!-- Large pill (label + icon) -->
   <div class="bubble-pill" onclick="
-    (function(){{
-      try {{
+    (function(){
+      try {
         const url = new URL(window.location.href);
         url.searchParams.set('open_chat', '1');
         window.location.href = url.toString();
-      }} catch(e){{ console.error(e); window.location.search = '?open_chat=1'; }}
-    }})();
+      } catch(e) {
+        window.location.search = '?open_chat=1';
+      }
+    })();
   ">
-    <div style="font-size:20px;">💬</div>
-    <div style="font-size:14px; color:#021617;">Ask OCULAIRE</div>
+    <div style='font-size:18px;'>💬</div>
+    <div style='font-size:14px; color:#021617;'>Ask OCULAIRE</div>
   </div>
 </div>
 """
+components.html(pill_html, height=120)
 
-# inject bubble into page (no cross-talk needed)
-components.html(bubble_html, height=100)
+# If open_chat flag present, render a fixed-position Streamlit overlay that behaves like a widget
+if open_chat:
+    # Overlay container (native Streamlit controls positioned fixed via HTML wrapper)
+    # We render the HTML shell first (header area with close button), then show Streamlit widgets below.
+    overlay_shell = """
+    <div class="chat-overlay" id="oculaire_chat_overlay">
+      <div class="header" style="padding:12px 14px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="font-size:18px;">🤖</div>
+          <div style="font-weight:800; color:#e6faff; font-size:16px;">Glaucoma Assistant</div>
+        </div>
+        <div>
+          <!-- Close handled by Streamlit button below (we keep this as visual) -->
+        </div>
+      </div>
+      <div class="body" id="oculaire_chat_body">
+      <!-- Streamlit will render chat history and inputs here -->
+      </div>
+    </div>
+    """
+    components.html(overlay_shell, height=10)  # minimal height; the actual Streamlit elements are placed below
 
-# Now render the expander; expansion controlled by query param
-st.markdown('<div class="floating-expander" style="position:relative;">', unsafe_allow_html=True)
-with st.expander("💬 Ask Glaucoma Assistant", expanded=open_chat):
-    st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:15px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
-    
-    # Display chat history
+    # Use a fixed container area for chat content using HTML wrapper and streamlit elements
+    # Place Streamlit-native elements that visually align with the overlay by using st.markdown with raw HTML + container
+    chat_container_html = """
+    <div style="position:fixed; bottom:100px; right:24px; width:420px; max-width:92vw; z-index:10001;">
+      <div style="padding:0;">
+    """
+    st.markdown(chat_container_html, unsafe_allow_html=True)
+
+    # Chat header row with close button (Streamlit button used to clear query params)
+    cols = st.columns([8,1])
+    with cols[0]:
+        st.markdown("<div style='padding:10px 8px; font-weight:800; color:#e6faff; font-size:16px;'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
+    with cols[1]:
+        # Close overlay: clear query params and rerun
+        if st.button("✖", key="close_chat_overlay"):
+            st.experimental_set_query_params()  # clear
+            st.experimental_rerun()
+
+    # Display chat history inside overlay body
+    st.markdown("<div style='max-height:300px; overflow:auto; padding:6px;'>", unsafe_allow_html=True)
     for msg in st.session_state.chat_history:
         if msg["role"] == "user":
             st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
         else:
             st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-    
-    # Input area
-    user_question = st.text_input("Your question:", key="chat_input", placeholder="e.g., What is glaucoma? How does OCT detect it?", label_visibility="collapsed")
-    
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        send_btn = st.button("📤 Send", use_container_width=True)
-    with col2:
-        clear_btn = st.button("🗑️", use_container_width=True)
-    
-    if send_btn and user_question:
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # Input area and buttons inside overlay footer
+    user_q = st.text_input("", key="floating_chat_input", placeholder="e.g., What is glaucoma? How does OCT detect it?")
+    col_input_left, col_input_right = st.columns([4,1])
+    with col_input_left:
+        send_btn = st.button("📤 Send", key="floating_send")
+    with col_input_right:
+        clear_btn = st.button("🗑️", key="floating_clear")
+
+    if send_btn and user_q:
         if not API_KEY:
-            st.error("❌ API key not configured. See sidebar.")
+            # Add error message in chat history (so user sees it)
+            st.session_state.chat_history.append({"role":"assistant", "content":"❌ API key not configured. See sidebar to add GEMINI_API_KEY."})
+            # Keep overlay open by maintaining query param
+            st.experimental_set_query_params(open_chat="1")
+            st.experimental_rerun()
         else:
             with st.spinner("🔍 Searching for answers..."):
-                response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
-                st.session_state.chat_history.append({"role": "user", "content": user_question})
-                st.session_state.chat_history.append({"role": "assistant", "content": response})
-                # Clear the query param so the chat does not auto-open on next refresh
-                st.experimental_set_query_params()
-                st.rerun()
-    
+                response_text = ask_glaucoma_assistant(user_q, st.session_state.chat_history, API_KEY)
+                st.session_state.chat_history.append({"role":"user", "content": user_q})
+                st.session_state.chat_history.append({"role":"assistant", "content": response_text})
+                # After sending, keep overlay open for follow-ups
+                st.experimental_set_query_params(open_chat="1")
+                st.experimental_rerun()
+
     if clear_btn:
         st.session_state.chat_history = []
-        # Clear the query param so the chat collapses
+        # Clear query params and rerun to collapse overlay
         st.experimental_set_query_params()
-        st.rerun()
+        st.experimental_rerun()
 
-st.markdown('</div>', unsafe_allow_html=True)
+    # close the chat container wrapper
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+# End of app.py
