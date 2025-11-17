@@ -288,7 +288,7 @@ Important: Always remind users to consult healthcare professionals for medical d
             
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
             
-            url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}
+            url = "https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
             
             response = requests.post(
                 url,
