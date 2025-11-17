@@ -1,5 +1,6 @@
-# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot
+# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (updated floating bubble)
 import streamlit as st
+import streamlit.components.v1 as components
 import numpy as np
 import joblib
 import tensorflow as tf
@@ -9,14 +10,14 @@ import cv2
 import io
 from matplotlib.backends.backend_pdf import PdfPages
 import os
+import requests
+import json
 
 # Try to import google.generativeai, fallback to requests
 try:
     import google.generativeai as genai
     USE_SDK = True
 except ImportError:
-    import requests
-    import json
     USE_SDK = False
 
 # -----------------------
@@ -38,7 +39,7 @@ def get_api_key():
     # Try Streamlit secrets first (for deployment)
     try:
         return st.secrets["GEMINI_API_KEY"]
-    except:
+    except Exception:
         pass
     
     # Try environment variable (for local development)
@@ -148,95 +149,43 @@ st.markdown("""
   text-shadow: 0 0 20px rgba(0,245,255,0.3);
 }
 
-/* Floating Chat Bubble */
-.chat-bubble {
+/* Floating Chat Bubble (pill) */
+.floating-bubble {
   position: fixed;
-  bottom: 30px;
-  right: 30px;
-  width: 70px;
-  height: 70px;
-  border-radius: 50%;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+}
+.bubble-pill {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:12px 18px;
+  border-radius:999px;
+  background: linear-gradient(90deg, var(--neonA), var(--neonB));
+  color:#021617;
+  font-weight:800;
+  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5);
+  cursor:pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.bubble-pill:hover { transform: translateY(-6px) scale(1.02); box-shadow: 0 0 40px rgba(0,245,255,0.8); }
+
+/* Floating small chat icon (round) - shown when collapsed */
+.bubble-icon {
+  width:64px;
+  height:64px;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:28px;
   background: linear-gradient(135deg, var(--neonA), var(--neonB));
   box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-  z-index: 9999;
-  animation: float 3s ease-in-out infinite, glow 2s ease-in-out infinite;
-  transition: transform 0.3s ease;
-}
-.chat-bubble:hover {
-  transform: scale(1.1);
-  box-shadow: 0 0 40px rgba(0,245,255,0.8), 0 0 50px rgba(255,64,196,0.7);
-}
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
-}
-@keyframes glow {
-  0%, 100% { box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5); }
-  50% { box-shadow: 0 0 40px rgba(0,245,255,0.9), 0 0 60px rgba(255,64,196,0.8); }
+  cursor:pointer;
 }
 
-/* Fixed button container */
-.floating-expander {
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 20px !important;
-  width: 400px !important;
-  z-index: 9999 !important;
-  box-shadow: 0 0 40px rgba(0,245,255,0.4), 0 0 60px rgba(255,64,196,0.3) !important;
-  border-radius: 16px !important;
-  animation: float 3s ease-in-out infinite !important;
-}
-
-/* Style the expander */
-.floating-expander details {
-  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
-  border: 2px solid rgba(0,245,255,0.3) !important;
-  border-radius: 16px !important;
-}
-
-.floating-expander details summary {
-  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
-  padding: 16px !important;
-  border-radius: 14px !important;
-  cursor: pointer !important;
-  font-weight: 800 !important;
-  font-size: 16px !important;
-  color: #e6faff !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-}
-
-.floating-expander details summary:hover {
-  background: linear-gradient(135deg, rgba(0,245,255,0.3), rgba(255,64,196,0.3)) !important;
-  box-shadow: 0 0 25px rgba(0,245,255,0.5) !important;
-}
-
-.floating-expander details[open] {
-  box-shadow: 0 0 50px rgba(0,245,255,0.6), 0 0 70px rgba(255,64,196,0.4) !important;
-}
-
-/* Floating Chat Expander at Bottom */
-.floating-expander {
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 20px !important;
-  width: 450px !important;
-  max-width: 90vw !important;
-  z-index: 9999 !important;
-  animation: float 3s ease-in-out infinite !important;
-}
-
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-8px); }
-}
-
+/* Ensure footer hidden */
 footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
@@ -473,13 +422,6 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING CHAT BUTTON (Bottom-right corner)
-# -----------------------
-# The button needs to be at the end of the page to appear at bottom
-
-# We'll place it after all content
-
-# -----------------------
 # LAYOUT
 # -----------------------
 colA, colB = st.columns(2)
@@ -576,10 +518,44 @@ st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING CHAT EXPANDER (Bottom-right corner)
+# FLOATING BUBBLE (Bottom-right) + Query-param driven expander open
 # -----------------------
-st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
-with st.expander("💬 Ask Glaucoma Assistant", expanded=False):
+# Mechanism:
+# - Clicking the bubble sets ?open_chat=1 in URL and reloads page
+# - Streamlit reads the query param and opens the chat expander automatically
+# - After sending/clearing the chat, we clear the query param so the bubble collapses again
+
+# Check query params to decide whether to expand chat
+query_params = st.experimental_get_query_params()
+open_chat = False
+if "open_chat" in query_params and query_params.get("open_chat", ["0"])[0] in ("1", "true", "True"):
+    open_chat = True
+
+# Render a clickable floating bubble using a tiny HTML widget
+bubble_html = f"""
+<div class="floating-bubble">
+  <!-- Large pill (label + icon) -->
+  <div class="bubble-pill" onclick="
+    (function(){{
+      try {{
+        const url = new URL(window.location.href);
+        url.searchParams.set('open_chat', '1');
+        window.location.href = url.toString();
+      }} catch(e){{ console.error(e); window.location.search = '?open_chat=1'; }}
+    }})();
+  ">
+    <div style="font-size:20px;">💬</div>
+    <div style="font-size:14px; color:#021617;">Ask OCULAIRE</div>
+  </div>
+</div>
+"""
+
+# inject bubble into page (no cross-talk needed)
+components.html(bubble_html, height=100)
+
+# Now render the expander; expansion controlled by query param
+st.markdown('<div class="floating-expander" style="position:relative;">', unsafe_allow_html=True)
+with st.expander("💬 Ask Glaucoma Assistant", expanded=open_chat):
     st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:15px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
     
@@ -607,10 +583,14 @@ with st.expander("💬 Ask Glaucoma Assistant", expanded=False):
                 response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
                 st.session_state.chat_history.append({"role": "user", "content": user_question})
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
+                # Clear the query param so the chat does not auto-open on next refresh
+                st.experimental_set_query_params()
                 st.rerun()
     
     if clear_btn:
         st.session_state.chat_history = []
+        # Clear the query param so the chat collapses
+        st.experimental_set_query_params()
         st.rerun()
 
 st.markdown('</div>', unsafe_allow_html=True)
