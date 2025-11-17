@@ -24,102 +24,41 @@ except Exception:
 # -----------------------
 # Page Config
 # -----------------------
-st.markdown("""
-<div class="header" style="display:flex;flex-direction:column;align-items:center;justify-content:center;margin-top:18px;margin-bottom:22px;">
-  <!-- top centered placeholder box with reversed eye -->
-  <div class="placeholder-box" style="width:120px;height:120px;border:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;margin-bottom:18px;border-radius:6px;background:rgba(255,255,255,0.01);box-shadow:0 8px 40px rgba(0,0,0,0.6);">
-    <img src="/mnt/data/3d95380c-230a-438f-b614-3a6133ab1352.png" alt="eye" class="placeholder-eye" style="width:68px; height:68px; object-fit:contain; transform: scaleX(-1); filter: drop-shadow(0 8px 20px rgba(0,245,255,0.15)) saturate(1.2);"/>
-  </div>
+import base64
 
-  <div class="hud-panel">
-    <div class="hud-inner">
-      <!-- Rotating eye SVG (kept subtle behind title) -->
-      <div class="eye-wrap" aria-hidden="true" style="pointer-events:none; opacity:0.9;">
-        <svg class="eye-svg" viewBox="0 0 100 100" width="110" height="110" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
-          <defs>
-            <radialGradient id="g1" cx="50%" cy="40%" r="60%">
-              <stop offset="0%" stop-color="#bff" stop-opacity="1"/>
-              <stop offset="60%" stop-color="#05c" stop-opacity="0.9"/>
-              <stop offset="100%" stop-color="#020617" stop-opacity="0.6"/>
-            </radialGradient>
-          </defs>
-          <g transform="translate(50 50)">
-            <g class="rotor">
-              <circle r="36" fill="url(#g1)" stroke="rgba(255,255,255,0.02)" stroke-width="0.6"></circle>
-              <circle r="18" fill="#0af" opacity="0.85"></circle>
-              <circle r="8" fill="#001"/>
-            </g>
-          </g>
-        </svg>
-      </div>
+def _get_header_img_data(path="assets/eye_reversed.png"):
+    try:
+        with open(path, "rb") as f:
+            return "data:image/png;base64," + base64.b64encode(f.read()).decode("utf-8")
+    except Exception:
+        # fallback to public SVG if local asset missing
+        return "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/Human_eye_icon.svg/1024px-Human_eye_icon.svg.png"
 
-      <div class="title-block">
-        <h1 class="oculaire-title">OCULAIRE</h1>
-        <h2 class="oculaire-sub">Illuminating Vision. Detecting Glaucoma.</h2>
-        <h3 class="oculaire-tag">AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</h3>
-      </div>
-    </div>
-  </div>
+img_data_uri = _get_header_img_data()
+
+st.markdown(f"""
+<div class="header" style="display:flex;flex-direction:column;align-items:center;justify-content:center;margin-top:20px;margin-bottom:20px; animation: fadeIn 1.2s ease-out;">
+  <img src="{img_data_uri}" width="90" style="filter: drop-shadow(0 0 12px rgba(0,245,255,0.6)); margin-bottom:10px; transform: scaleX(-1);" />
+  <h1 style="font-size:56px; font-weight:900; letter-spacing:4px; background: linear-gradient(90deg, #00f5ff, #ff40c4); -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-shadow: 0 0 35px rgba(0,245,255,0.9), 0 0 45px rgba(255,64,196,0.8); animation: glowPulse 2.5s infinite ease-in-out;">
+    OCULAIRE
+  </h1>
+  <h2 style="color:#a4b1c9; font-weight:500; margin-top:-10px; font-size:20px;">Illuminating Vision. Detecting Glaucoma.</h2>
+  <h3 style="color:#7fa6ff; font-weight:400; font-size:16px;">AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</h3>
 </div>
-
+<hr>
 <style>
-.placeholder-box{backdrop-filter: blur(6px);}
-.placeholder-eye{transition: transform 0.9s ease, filter 0.9s ease;}
-.placeholder-box:hover .placeholder-eye{transform: scaleX(-1) scale(1.04); filter: drop-shadow(0 12px 28px rgba(0,245,255,0.24)) saturate(1.4);} 
-
-/* HUD panel */
-.hud-panel{
-  width:100%; max-width:1100px; border-radius:18px; padding:18px; box-sizing:border-box;
-  background: linear-gradient(180deg, rgba(10,15,30,0.55), rgba(2,4,10,0.35));
-  border:1px solid rgba(0,245,255,0.06); box-shadow: 0 12px 50px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.02);
-  position:relative; overflow:hidden; backdrop-filter: blur(6px);
+@keyframes glowPulse {
+  0% { text-shadow: 0 0 25px rgba(0,245,255,0.5), 0 0 35px rgba(255,64,196,0.4); transform: scale(1); }
+  50% { text-shadow: 0 0 45px rgba(0,245,255,1), 0 0 60px rgba(255,64,196,0.8); transform: scale(1.03); }
+  100% { text-shadow: 0 0 25px rgba(0,245,255,0.5), 0 0 35px rgba(255,64,196,0.4); transform: scale(1); }
 }
-.hud-panel::before{
-  content:""; position:absolute; left:0; right:0; top:0; height:1px; background:linear-gradient(90deg, rgba(0,245,255,0.06), rgba(255,64,196,0.03)); transform:translateY(-18px);
+@keyframes fadeIn {
+  from { opacity:0; transform: translateY(-20px); }
+  to { opacity:1; transform: translateY(0); }
 }
-.hud-panel::after{
-  content:""; position:absolute; left:0; right:0; bottom:0; height:40%; background: linear-gradient(180deg, rgba(255,255,255,0.002), rgba(255,255,255,0.01)); pointer-events:none;
-}
-
-.hud-inner{display:flex; align-items:center; gap:28px; justify-content:center; padding:12px;}
-.eye-wrap{width:120px; height:120px; display:flex; align-items:center; justify-content:center;}
-.eye-svg{filter: drop-shadow(0 10px 25px rgba(0,245,255,0.06)); opacity:0.18}
-
-/* rotating rotor */
-.rotor{ transform-origin:0 0; }
-.eye-svg .rotor{ animation: eye-rotate 12s linear infinite; }
-@keyframes eye-rotate{ 0%{ transform: rotate(0deg) } 100%{ transform: rotate(360deg) } }
-
-/* HUD scanlines */
-.hud-panel{background-image: linear-gradient(transparent 0%, rgba(255,255,255,0.006) 1%, transparent 2%); background-size:100% 14px;}
-@keyframes scan { 0% { background-position-y:0 } 100% { background-position-y:28px } }
-.hud-panel{ animation: scan 8s linear infinite; }
-
-/* title styles */
-.title-block{ text-align:center; min-width:420px;}
-.oculaire-title{
-  font-size:62px; margin:6px 0 0 0; letter-spacing:8px; font-weight:900; color:transparent; -webkit-background-clip:text;
-  background: linear-gradient(90deg,#bde8ff,#e6c4ff,#bde8ff); background-size:200% auto;
-  animation: titleGlow 4s ease-in-out infinite alternate, titleColorShift 8s linear infinite; text-shadow: 0 0 38px rgba(120,150,255,0.28);
-}
-.oculaire-sub{ margin:10px 0 0 0; color:#a7b8d9; font-weight:600; font-size:18px }
-.oculaire-tag{ margin:8px 0 0 0; color:#7fb0ff; font-weight:500; opacity:0.95; font-size:14px }
-
-/* ring subtle movement */
-.hud-ring{ opacity:0.9; }
-
-/* responsive */
-@media (max-width:900px){ .hud-inner{flex-direction:column-reverse; gap:12px} .title-block{text-align:center} .title-block{min-width:unset} }
-
-@keyframes titleGlow {
-  0% { text-shadow: 0 0 25px rgba(0,245,255,0.45), 0 0 40px rgba(255,64,196,0.45), 0 0 60px rgba(0,180,255,0.4); transform:scale(1); }
-  50% { text-shadow: 0 0 55px rgba(0,245,255,0.9), 0 0 85px rgba(255,64,196,0.8), 0 0 110px rgba(0,180,255,0.8); transform:scale(1.04); }
-  100% { text-shadow: 0 0 30px rgba(0,245,255,0.5), 0 0 50px rgba(255,64,196,0.5), 0 0 70px rgba(0,180,255,0.45); transform:scale(1); }
-}
-
-@keyframes titleColorShift { 0% { background-position:0% center; } 100% { background-position:200% center; } }
 </style>
 """, unsafe_allow_html=True)
+
 
 # -----------------------
 st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
