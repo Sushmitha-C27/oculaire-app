@@ -1,5 +1,4 @@
-# app.py — OCULAIRE Neon Lab vFinal — full file with MODEL_NAME (gemini-2.5-pro),
-# beating floating pill that opens server-side overlay (anchor link), and reliable server-side Send.
+# app.py — OCULAIRE Neon Lab v5 with beating floating pill + overlay chat (full file)
 # Run: streamlit run app.py
 
 import streamlit as st
@@ -17,18 +16,12 @@ import requests
 import json
 import time
 
-# Prefer SDK if installed; fallback to REST
+# Try to import google.generativeai, fallback to requests
 try:
     import google.generativeai as genai
     USE_SDK = True
 except Exception:
     USE_SDK = False
-
-# -----------------------
-# MODEL CONFIG
-# -----------------------
-# IMPORTANT: for REST URL include the 'models/' prefix (e.g. "models/gemini-2.5-pro")
-MODEL_NAME = "models/gemini-2.5-pro"
 
 # -----------------------
 # Page Config
@@ -43,6 +36,7 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
+# Keep last processed question to avoid duplicate processing across reruns
 if 'last_processed_q' not in st.session_state:
     st.session_state['last_processed_q'] = None
 
@@ -50,14 +44,10 @@ if 'last_processed_q' not in st.session_state:
 # Get API key from Streamlit secrets or environment variable
 # -----------------------
 def get_api_key():
-    # Streamlit secrets first
     try:
-        key = st.secrets["GEMINI_API_KEY"]
-        if key:
-            return key
+        return st.secrets["GEMINI_API_KEY"]
     except Exception:
         pass
-    # Environment fallback
     env_key = os.getenv("GEMINI_API_KEY")
     if env_key:
         return env_key
@@ -162,82 +152,155 @@ st.markdown("""
   text-shadow: 0 0 20px rgba(0,245,255,0.3);
 }
 
-/* Ensure footer hidden */
+/* Floating Chat Bubble */
+.chat-bubble {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--neonA), var(--neonB));
+  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  z-index: 9999;
+  animation: float 3s ease-in-out infinite, glow 2s ease-in-out infinite;
+  transition: transform 0.3s ease;
+}
+.chat-bubble:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 40px rgba(0,245,255,0.8), 0 0 50px rgba(255,64,196,0.7);
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5); }
+  50% { box-shadow: 0 0 40px rgba(0,245,255,0.9), 0 0 60px rgba(255,64,196,0.8); }
+}
+
+/* Fixed button container */
+.floating-expander {
+  position: fixed !important;
+  bottom: 20px !important;
+  right: 20px !important;
+  width: 400px !important;
+  z-index: 9999 !important;
+  box-shadow: 0 0 40px rgba(0,245,255,0.4), 0 0 60px rgba(255,64,196,0.3) !important;
+  border-radius: 16px !important;
+  animation: float 3s ease-in-out infinite !important;
+}
+
+/* Style the expander */
+.floating-expander details {
+  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
+  border: 2px solid rgba(0,245,255,0.3) !important;
+  border-radius: 16px !important;
+}
+
+.floating-expander details summary {
+  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
+  padding: 16px !important;
+  border-radius: 14px !important;
+  cursor: pointer !important;
+  font-weight: 800 !important;
+  font-size: 16px !important;
+  color: #e6faff !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.floating-expander details summary:hover {
+  background: linear-gradient(135deg, rgba(0,245,255,0.3), rgba(255,64,196,0.3)) !important;
+  box-shadow: 0 0 25px rgba(0,245,255,0.5) !important;
+}
+
+.floating-expander details[open] {
+  box-shadow: 0 0 50px rgba(0,245,255,0.6), 0 0 70px rgba(255,64,196,0.4) !important;
+}
+
+/* Floating Chat Expander at Bottom */
+.floating-expander {
+  position: fixed !important;
+  bottom: 20px !important;
+  right: 20px !important;
+  width: 450px !important;
+  max-width: 90vw !important;
+  z-index: 9999 !important;
+  animation: float 3s ease-in-out infinite !important;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+
 footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
 
 # -----------------------
-# ask_glaucoma_assistant using MODEL_NAME for SDK and REST
+# Chatbot Function
 # -----------------------
 def ask_glaucoma_assistant(question, history, api_key):
-    """Call Google Gemini (SDK if available, otherwise REST) using MODEL_NAME."""
+    """Call Google Gemini API with glaucoma-specific context"""
     if not api_key or not api_key.strip():
         return "⚠️ Please configure your Google Gemini API key (see sidebar)."
+    system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
 
-    system_instruction = (
-        "You are a specialized medical AI assistant focused exclusively on glaucoma. "
-        "Answer only glaucoma/OCT/RNFLT-related questions concisely and include a short disclaimer "
-        "that this is educational information, not medical advice."
-    )
+Your role:
+- Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment
+- Provide accurate, evidence-based information about glaucoma
+- Explain medical terminology clearly
+- If asked about non-glaucoma topics, politely redirect to glaucoma-related questions
+- Keep responses concise and under 200 words
+- Always include a brief disclaimer that you're providing educational information, not medical advice
 
+Important: Always remind users to consult healthcare professionals for medical decisions."""
     try:
-        # SDK path
         if USE_SDK:
             genai.configure(api_key=api_key)
-            # model name passed to SDK (same identifier)
-            model = genai.GenerativeModel(MODEL_NAME)
-
-            # Build conversation history (last 6 messages)
+            model = genai.GenerativeModel('gemini-1.5-flash')
             chat_history = []
             for msg in history[-6:]:
                 role = "user" if msg["role"] == "user" else "model"
                 chat_history.append({"role": role, "parts": [msg["content"]]})
-
             chat = model.start_chat(history=chat_history)
             response = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
             return response.text
-
-        # REST path
         else:
             conversation_context = ""
             for msg in history[-6:]:
                 role = "User" if msg["role"] == "user" else "Assistant"
                 conversation_context += f"{role}: {msg['content']}\n\n"
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
-
-            # Ensure MODEL_NAME contains 'models/' prefix for REST URL
-            url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
-
-            payload = {
-                "contents": [{"parts": [{"text": full_prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.7,
-                    "maxOutputTokens": 512
-                }
-            }
-
-            response = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=30)
-
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
+            response = requests.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [{"parts": [{"text": full_prompt}]}],
+                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1000}
+                },
+                timeout=30
+            )
             if response.status_code == 200:
                 data = response.json()
-                try:
-                    return data["candidates"][0]["content"][0]["text"] if "candidates" in data and data["candidates"] and "content" in data["candidates"][0] and data["candidates"][0]["content"] else data["candidates"][0]["content"]["parts"][0]["text"]
-                except Exception:
-                    # defensive fallback to common structure
-                    try:
-                        return data["candidates"][0]["content"]["parts"][0]["text"]
-                    except Exception:
-                        return "❌ Unexpected API response format."
+                return data["candidates"][0]["content"]["parts"][0]["text"]
             elif response.status_code == 403:
-                return "🔑 API key invalid or restricted (403)."
+                return "🔑 API key invalid. Get a new key at https://aistudio.google.com/apikey"
             elif response.status_code == 404:
-                return "❌ API not accessible (404) — check model name and API access."
+                return "❌ API not accessible. Your key might be restricted. Try creating a new unrestricted key."
             else:
-                return f"❌ Error ({response.status_code}): {response.text[:300]}"
-
+                return f"❌ Error ({response.status_code}): {response.text[:200]}"
     except Exception as e:
-        return f"❌ Exception while calling assistant: {str(e)}"
+        return f"❌ Error: {str(e)}\n\nTip: Make sure your API key from https://aistudio.google.com/apikey is unrestricted."
 
 # -----------------------
 # Header
@@ -251,7 +314,7 @@ st.markdown("""
 st.markdown("---")
 
 # -----------------------
-# Load Models (unchanged)
+# Load Models
 # -----------------------
 @st.cache_resource
 def load_models():
@@ -272,7 +335,7 @@ def load_models():
 b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models()
 
 # -----------------------
-# Helpers (unchanged)
+# Helpers
 # -----------------------
 def process_npz(f):
     try:
@@ -429,170 +492,4 @@ if rnflt_file or bscan_file:
             label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
             diff, risk, sev = compute_risk_map(rnflt, avg_healthy, -threshold)
             severity_overall = max(severity_overall, sev)
-            m1, m2, m3, m4 = st.columns([2,2,2,2])
-            m1.markdown(f"<div class='metric-label'>Status</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_r else '✅'} {label_r}</div>", unsafe_allow_html=True)
-            m2.markdown(f"<div class='metric-label'>Mean RNFLT</div><div class='large-metric'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
-            m3.markdown(f"<div class='metric-label'>Std Dev</div><div class='large-metric'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
-            m4.markdown(f"<div class='metric-label'>Cluster</div><div class='large-metric'>{cluster}</div>", unsafe_allow_html=True)
-
-            st.markdown(render_severity(sev), unsafe_allow_html=True)
-            fig, axes = plt.subplots(1,3,figsize=(18,6),constrained_layout=True)
-            im0=axes[0].imshow(rnflt,cmap='turbo');axes[0].axis('off');axes[0].set_title("Uploaded RNFLT")
-            plt.colorbar(im0,ax=axes[0],shrink=0.85)
-            im1=axes[1].imshow(diff,cmap='bwr',vmin=-30,vmax=30);axes[1].axis('off');axes[1].set_title("Difference (vs Healthy)")
-            plt.colorbar(im1,ax=axes[1],shrink=0.85)
-            im2=axes[2].imshow(risk,cmap='hot');axes[2].axis('off');axes[2].set_title("Risk Map")
-            plt.colorbar(im2,ax=axes[2],shrink=0.85)
-            fig.patch.set_facecolor("#050612")
-            st.pyplot(fig)
-            figs.append(fig)
-
-    # B-Scan Processing
-    if bscan_file and b_model is not None:
-        image_pil = Image.open(bscan_file).convert("L")
-        batch, proc = preprocess_bscan(image_pil)
-        pred_raw = b_model.predict(batch, verbose=0)[0][0]
-        label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
-        conf = pred_raw*100 if label_b=="Glaucoma-like" else (1-pred_raw)*100
-        severity_overall = max(severity_overall, conf)
-
-        st.markdown("<hr>", unsafe_allow_html=True)
-        m1, m2 = st.columns(2)
-        m1.markdown(f"<div class='metric-label'>CNN Prediction</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
-        m2.markdown(f"<div class='metric-label'>Confidence</div><div class='large-metric'>{conf:.2f}%</div>", unsafe_allow_html=True)
-        st.markdown(render_severity(conf), unsafe_allow_html=True)
-
-        heat = gradcam(batch, b_model)
-        if heat is not None:
-            heat_r = cv2.resize(heat, (224,224))
-            hm = (heat_r * 255).astype(np.uint8)
-            hm_color = cv2.applyColorMap(hm, cv2.COLORMAP_JET)
-            overlay = (np.stack([proc]*3, axis=-1)*255).astype(np.uint8)
-            overlay = cv2.addWeighted(overlay, 0.6, hm_color, 0.4, 0)
-            st.image([image_pil, overlay], caption=["Original B-Scan", "Grad-CAM Overlay"], use_column_width=True)
-
-    # Combined Severity Summary
-    st.markdown("<hr>", unsafe_allow_html=True)
-    st.markdown(f"<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
-    st.markdown(render_severity(severity_overall), unsafe_allow_html=True)
-
-    # Download buttons
-    if figs:
-        png_bytes = fig_to_png(figs[0])
-        pdf_bytes = create_pdf(figs)
-        st.markdown("<div class='download-btns'>", unsafe_allow_html=True)
-        st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
-        st.download_button("📄 Download Full Report (PDF)", data=pdf_bytes, file_name="oculaire_report.pdf", mime="application/pdf")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
-
-# --------------------------
-# Floating pill (client) — clicking reloads page with ?open_chat=1 (anchor link — reliable)
-# --------------------------
-pill_html = """
-<div style="position:fixed; bottom:24px; right:24px; z-index:99999;">
-  <a href="?open_chat=1" style="text-decoration:none;">
-    <div style="
-        display:flex; align-items:center; gap:12px;
-        padding:14px 22px; border-radius:999px; cursor:pointer;
-        background:linear-gradient(90deg,#00f5ff,#ff40c4);
-        box-shadow:0 12px 40px rgba(0,0,0,0.6);
-        transform-origin:center;
-        animation:beat 1.6s infinite ease-in-out;
-    ">
-      <div style="
-          width:40px; height:40px; border-radius:50%;
-          background:white; display:flex; align-items:center; justify-content:center;
-          font-size:18px; box-shadow:0 4px 18px rgba(0,0,0,0.45);
-      ">💬</div>
-      <div style="font-weight:800; font-size:16px; color:white !important; text-shadow:0 0 6px rgba(0,0,0,0.6);">
-        Ask OCULAIRE
-      </div>
-    </div>
-  </a>
-</div>
-
-<style>
-@keyframes beat {
-  0%{transform:scale(1)}25%{transform:scale(1.02)}50%{transform:scale(1.04)}75%{transform:scale(1.02)}100%{transform:scale(1)}
-}
-</style>
-"""
-
-# Render the pill — increase height to avoid clipping
-components.html(pill_html, height=180)
-
-# -------------------------
-# If open_chat present, render overlay server-side with text_input + send button
-# -------------------------
-params = st.experimental_get_query_params()
-open_chat = params.get("open_chat", ["0"])[0] in ("1","true","True")
-
-if open_chat:
-    # Overlay shell
-    st.markdown("""
-    <div style="
-      position:fixed;
-      bottom:100px;
-      right:24px;
-      width:420px;
-      max-width:92vw;
-      z-index:100000;
-      border-radius:14px;
-      background:linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98));
-      border:1px solid rgba(255,255,255,0.06);
-      padding:0;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-    ">
-      <div style="padding:12px 14px; display:flex; justify-content:space-between; align-items:center; color:white;">
-        <div style="font-weight:800; font-size:16px;">🤖 OCULAIRE Assistant</div>
-        <div>
-          <form style="display:inline;">
-            <button formaction="." name="close" value="1" style="background:none; border:none; color:white; font-size:18px; cursor:pointer;">✖</button>
-          </form>
-        </div>
-      </div>
-    """, unsafe_allow_html=True)
-
-    # Show chat history
-    st.markdown("<div style='padding:8px 14px; max-height:260px; overflow:auto;'>", unsafe_allow_html=True)
-    if not st.session_state.chat_history:
-        st.markdown("<div style='color:#cbd5e1; margin-bottom:8px;'>No messages yet. Ask about glaucoma, OCT, or RNFLT.</div>", unsafe_allow_html=True)
-    else:
-        for m in st.session_state.chat_history:
-            if m["role"] == "user":
-                st.markdown(f"<div class='user-msg'><strong>You:</strong> {m['content']}</div>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<div class='assistant-msg'><strong>OCULAIRE:</strong> {m['content']}</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Server-side input area (reliable)
-    with st.form(key="chat_form", clear_on_submit=False):
-        user_q = st.text_input("", key="server_chat_input", placeholder="Type your question here — e.g., what is OCT?", help="Press Send to submit to the assistant")
-        col1, col2 = st.columns([4,1])
-        with col1:
-            send = st.form_submit_button("Send")
-        with col2:
-            clear = st.form_submit_button("Clear")
-
-        if send and user_q:
-            st.session_state.chat_history.append({"role":"user","content":user_q})
-            reply = ask_glaucoma_assistant(user_q, st.session_state.chat_history, API_KEY)
-            st.session_state.chat_history.append({"role":"assistant","content":reply})
-            st.experimental_set_query_params(open_chat="1")
-            st.experimental_rerun()
-
-        if clear:
-            st.session_state.chat_history = []
-            st.experimental_set_query_params(open_chat="1")
-            st.experimental_rerun()
-
-    # close overlay wrapper
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# -------------------------
-# Footer note
-# -------------------------
-st.markdown("<div style='text-align:center; padding:10px; color:#9aa8c8;'>OCULAIRE Neon Lab — research only</div>", unsafe_allow_html=True)
+            m1, m2,
