@@ -1,5 +1,7 @@
-# app.py — OCULAIRE Option C (Neon Green UI) — Full app
+# app.py — OCULAIRE Option C (Neon Green UI) — Full app with
+# AI Scan Quality Score (SNR + blur) and Progression Analysis
 # ============================================================
+
 import os
 import io
 import time
@@ -230,6 +232,18 @@ def list_runs(limit=20):
         st.warning(f"Could not read saved runs: {e}")
         return []
 
+def list_runs_for_patient(patient, patient_id=None, limit=100):
+    try:
+        with db_cursor() as (conn, c):
+            if patient_id:
+                c.execute('SELECT id, patient, patient_id, timestamp, metrics, severity, quality FROM runs WHERE patient_id = ? ORDER BY timestamp ASC', (patient_id,))
+            else:
+                c.execute('SELECT id, patient, patient_id, timestamp, metrics, severity, quality FROM runs WHERE patient = ? ORDER BY timestamp ASC', (patient,))
+            return c.fetchall()
+    except Exception as e:
+        st.warning(f"Could not read patient runs: {e}")
+        return []
+
 def load_run_png(run_id):
     try:
         with db_cursor() as (conn, c):
@@ -346,26 +360,85 @@ def fig_to_png(fig, dpi=150):
     return buf.getvalue()
 
 # ============================================================
-# PDF generator (reportlab) — description/body text styled blue
+# New: AI Scan Quality Score (SNR + Blur)
+# - SNR_est = mean_signal / std_noise (estimated by local patch noise)
+# - Blur metric = variance of Laplacian (higher = sharper)
+# Combine normalized SNR and sharpness to 0-100
 # ============================================================
-def generate_full_pdf(figs, rnflt_metrics=None, rnflt_cluster=None, rnflt_severity=None, bscan_label=None, bscan_conf=None):
+def estimate_snr(img_gray):
+    # Expect img_gray in [0..255] or float [0..1]
+    arr = np.array(img_gray).astype(np.float32)
+    # normalize to 0..1
+    if arr.max() > 1.0:
+        arr_n = (arr - arr.min()) / (arr.max() - arr.min() + 1e-9)
+    else:
+        arr_n = arr
+    mean_signal = np.nanmean(arr_n)
+    std_noise = np.nanstd(arr_n)
+    if std_noise < 1e-6:
+        return 100.0
+    snr = mean_signal / std_noise
+    # map SNR to 0..100 using an empiric scale
+    snr_score = 100 * (np.tanh((snr - 1.0) / 1.5) * 0.5 + 0.5)
+    return float(np.clip(snr_score, 0, 100))
+
+def estimate_sharpness(img_gray):
+    arr = np.array(img_gray).astype(np.uint8)
+    lap = cv2.Laplacian(arr, cv2.CV_64F)
+    var_lap = float(np.var(lap))
+    # map variance to 0..100 empirically (cap)
+    # very blurry -> var ~ 0..10 ; sharp -> var can be >500
+    sharp_score = 100 * (np.tanh((var_lap - 30) / 120) * 0.5 + 0.5)
+    return float(np.clip(sharp_score, 0, 100)), var_lap
+
+def compute_quality_from_image_pil(pil_img):
+    # pil_img is grayscale or RGB; convert to grayscale
+    try:
+        gray = pil_img.convert("L")
+        snr_s = estimate_snr(np.array(gray))
+        sharp_s, var_lap = estimate_sharpness(gray)
+        # combine: weight sharpness 0.6, SNR 0.4
+        combined = 0.6 * sharp_s + 0.4 * snr_s
+        # penalize extreme low values
+        return float(np.clip(combined, 0, 100)), {"snr_score": snr_s, "sharp_score": sharp_s, "var_lap": var_lap}
+    except Exception:
+        return 0.0, {"snr_score": 0.0, "sharp_score": 0.0, "var_lap": 0.0}
+
+def compute_quality_from_array(arr):
+    # arr: 2D numpy array (RNFLT map)
+    try:
+        # scale to 0..255 for image operations
+        a = arr.copy().astype(np.float32)
+        a = a - np.nanmin(a)
+        if np.nanmax(a) > 0:
+            a = (a / (np.nanmax(a))) * 255.0
+        else:
+            a = a * 0.0
+        a = np.nan_to_num(a).astype(np.uint8)
+        pil = Image.fromarray(a)
+        return compute_quality_from_image_pil(pil)
+    except Exception:
+        return 0.0, {"snr_score": 0.0, "sharp_score": 0.0, "var_lap": 0.0}
+
+# ============================================================
+# PDF generator (reportlab) — description/body text styled blue
+# (unchanged from earlier — kept for completeness)
+# ============================================================
+def generate_full_pdf(figs, rnflt_metrics=None, rnflt_cluster=None, rnflt_severity=None, bscan_label=None, bscan_conf=None, quality=None):
     if not REPORTLAB_AVAILABLE:
         raise RuntimeError("reportlab is required for PDF generation. Install reportlab and restart.")
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=36, bottomMargin=36, leftMargin=50, rightMargin=50)
     styles = getSampleStyleSheet()
 
-    # Title/Body styles — body colored blue as requested
     title_style = ParagraphStyle("TitleGlow", parent=styles["Title"], fontSize=26, textColor=colors.HexColor("#00eaff"), alignment=1)
     subtitle_style = ParagraphStyle("Subtitle", parent=styles["Heading2"], fontSize=12, textColor=colors.HexColor("#ff40c4"), alignment=1)
     header_green = ParagraphStyle("HeaderGreen", parent=styles["Heading2"], fontSize=14, textColor=colors.HexColor("#39ff14"))
-    # *** BODY in BLUE as requested ***
     body_blue = ParagraphStyle("BodyBlue", parent=styles["BodyText"], fontSize=11, leading=14, textColor=colors.HexColor("#0b6aff"))
     body_small_blue = ParagraphStyle("SmallBlue", parent=styles["BodyText"], fontSize=9, leading=12, textColor=colors.HexColor("#0b6aff"))
 
     story = []
 
-    # Page 1 — cover + metadata + executive summary
     story.append(Paragraph("OCULAIRE", title_style))
     story.append(Paragraph("AI-Powered Glaucoma Screening Report", subtitle_style))
     story.append(Spacer(1, 16))
@@ -389,7 +462,6 @@ def generate_full_pdf(figs, rnflt_metrics=None, rnflt_cluster=None, rnflt_severi
     story.append(meta_table)
     story.append(Spacer(1, 12))
 
-    # Exec summary (color-coded red/green)
     if (rnflt_cluster == "Glaucoma-like") or (bscan_label == "Glaucoma-like"):
         risk_color = colors.HexColor("#ff6b6b")
         risk_text = "⚠️ ABNORMAL PATTERNS DETECTED"
@@ -399,7 +471,7 @@ def generate_full_pdf(figs, rnflt_metrics=None, rnflt_cluster=None, rnflt_severi
         risk_text = "✅ NORMAL PATTERNS DETECTED"
         risk_level = "LOW"
 
-    exec_para = Paragraph(f"<b>Status:</b> {risk_text}<br/><b>Risk Level:</b> {risk_level}<br/><b>Severity Index:</b> {(rnflt_severity or 0):.1f}%<br/><b>CNN Confidence:</b> {(bscan_conf or 0):.1f}%", body_blue)
+    exec_para = Paragraph(f"<b>Status:</b> {risk_text}<br/><b>Risk Level:</b> {risk_level}<br/><b>Severity Index:</b> {(rnflt_severity or 0):.1f}%<br/><b>CNN Confidence:</b> {(bscan_conf or 0):.1f}%<br/><b>Scan Quality:</b> {(quality or 0):.1f}%", body_blue)
     box_table = Table([[exec_para]], colWidths=[450])
     box_table.setStyle(TableStyle([
         ("BACKGROUND",(0,0),(-1,-1), risk_color),
@@ -413,16 +485,13 @@ def generate_full_pdf(figs, rnflt_metrics=None, rnflt_cluster=None, rnflt_severi
     story.append(box_table)
     story.append(PageBreak())
 
-    # Page 2 — Clinical interpretation & RNFLT stats
-    story.append(Paragraph("CLINICAL INTERPRETATION", header_green))
-    story.append(Spacer(1,8))
+    story.append(Paragraph("CLINICAL INTERPRETATION", header_green)); story.append(Spacer(1,8))
     if rnflt_cluster == "Glaucoma-like":
         story.append(Paragraph("The AI analysis has detected <b>patterns consistent with glaucomatous changes</b> in your RNFL structure. These include thinning in clinically significant regions compared to the healthy reference.", body_blue))
     else:
         story.append(Paragraph("The RNFL pattern appears <b>within normal ranges</b>. No significant signs of glaucomatous thinning are identified at this time.", body_blue))
     story.append(Spacer(1,10))
-    story.append(Paragraph("<b>Key Findings</b>", body_blue))
-    story.append(Spacer(1,6))
+    story.append(Paragraph("<b>Key Findings</b>", body_blue)); story.append(Spacer(1,6))
     if rnflt_cluster == "Glaucoma-like":
         findings = [
             "- RNFL thinning detected in critical sectors.",
@@ -439,8 +508,7 @@ def generate_full_pdf(figs, rnflt_metrics=None, rnflt_cluster=None, rnflt_severi
     for f in findings:
         story.append(Paragraph(f, body_blue))
     story.append(Spacer(1,12))
-    story.append(Paragraph("<b>RNFLT Measurements</b>", header_green))
-    story.append(Spacer(1,6))
+    story.append(Paragraph("<b>RNFLT Measurements</b>", header_green)); story.append(Spacer(1,6))
     if rnflt_metrics:
         rnflt_tbl = [
             ["Mean Thickness", f"{rnflt_metrics.get('mean',0):.2f} μm"],
@@ -457,9 +525,7 @@ def generate_full_pdf(figs, rnflt_metrics=None, rnflt_cluster=None, rnflt_severi
         story.append(rnflt_table)
     story.append(PageBreak())
 
-    # Page 3 — Images
-    story.append(Paragraph("DETAILED VISUAL ANALYSIS", header_green))
-    story.append(Spacer(1,8))
+    story.append(Paragraph("DETAILED VISUAL ANALYSIS", header_green)); story.append(Spacer(1,8))
     for fig in figs:
         try:
             png = fig_to_png(fig)
@@ -470,58 +536,34 @@ def generate_full_pdf(figs, rnflt_metrics=None, rnflt_cluster=None, rnflt_severi
             pass
     story.append(PageBreak())
 
-    # Page 4 — Symptoms & Risks
-    story.append(Paragraph("SYMPTOMS & RISK FACTORS", header_green))
-    story.append(Spacer(1,8))
+    story.append(Paragraph("SYMPTOMS & RISK FACTORS", header_green)); story.append(Spacer(1,8))
     story.append(Paragraph("<b>Symptoms to Monitor</b>", body_blue))
-    symptoms = [
-        "Gradual peripheral vision loss",
-        "Blurred vision or halos around lights",
-        "Difficulty adjusting to darkness",
-        "Eye discomfort or headaches"
-    ]
-    for s in symptoms:
-        story.append(Paragraph(f"- {s}", body_blue))
+    symptoms = ["Gradual peripheral vision loss", "Blurred vision or halos around lights", "Difficulty adjusting to darkness", "Eye discomfort or headaches"]
+    for s in symptoms: story.append(Paragraph(f"- {s}", body_blue))
     story.append(Spacer(1,8))
     story.append(Paragraph("<b>Major Risk Factors</b>", body_blue))
     risks = ["Age >60", "Family history", "High IOP", "Thin corneas", "High myopia", "Diabetes / Hypertension"]
-    for r in risks:
-        story.append(Paragraph(f"- {r}", body_blue))
+    for r in risks: story.append(Paragraph(f"- {r}", body_blue))
     story.append(PageBreak())
 
-    # Page 5 — Recommendations
-    story.append(Paragraph("RECOMMENDATIONS & ACTION PLAN", header_green))
-    story.append(Spacer(1,8))
+    story.append(Paragraph("RECOMMENDATIONS & ACTION PLAN", header_green)); story.append(Spacer(1,8))
     if rnflt_cluster == "Glaucoma-like":
-        recs = [
-            "Schedule ophthalmologist visit within 1-2 weeks.",
-            "Request tonometry, visual fields, gonioscopy and dilated optic nerve exam.",
-            "Bring this report to your appointment."
-        ]
+        recs = ["Schedule ophthalmologist visit within 1-2 weeks.", "Request tonometry, visual fields, gonioscopy and dilated optic nerve exam.", "Bring this report to your appointment."]
     else:
-        recs = [
-            "Continue routine annual eye exams.",
-            "Document this baseline for future comparison.",
-            "Consider earlier follow-up if any symptoms occur."
-        ]
-    for r in recs:
-        story.append(Paragraph(f"- {r}", body_blue))
+        recs = ["Continue routine annual eye exams.", "Document this baseline for future comparison.", "Consider earlier follow-up if any symptoms occur."]
+    for r in recs: story.append(Paragraph(f"- {r}", body_blue))
     story.append(Spacer(1,10))
     story.append(Paragraph("<b>Lifestyle Recommendations</b>", body_blue))
     lifestyle = ["Antioxidant-rich diet", "Regular aerobic activity", "Protect eyes from UV", "Limit caffeine, avoid smoking", "Sleep 7–9 hours"]
-    for l in lifestyle:
-        story.append(Paragraph(f"- {l}", body_blue))
+    for l in lifestyle: story.append(Paragraph(f"- {l}", body_blue))
     story.append(PageBreak())
 
-    # Page 6 — Disclaimer & References
-    story.append(Paragraph("IMPORTANT MEDICAL DISCLAIMER", header_green))
-    story.append(Spacer(1,8))
+    story.append(Paragraph("IMPORTANT MEDICAL DISCLAIMER", header_green)); story.append(Spacer(1,8))
     story.append(Paragraph("This OCULAIRE report is generated by an AI screening tool for research and educational purposes only. It is not a clinical diagnosis. Always consult an ophthalmologist for medical decisions.", body_blue))
     story.append(Spacer(1,8))
     story.append(Paragraph("<b>Methodology & References</b>", header_green))
     refs = ["Weinreb RN et al., JAMA 2014", "Tham YC et al., Ophthalmology 2014", "European Glaucoma Society Guidelines 2021"]
-    for ref in refs:
-        story.append(Paragraph(f"- {ref}", body_small_blue))
+    for ref in refs: story.append(Paragraph(f"- {ref}", body_small_blue))
 
     doc.build(story)
     buffer.seek(0)
@@ -548,7 +590,6 @@ def ask_glaucoma_assistant(question, history, api_key):
             response = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
             return response.text
         else:
-            # simple HTTP fallback to Google Generative Language API (if allowed)
             convo = ""
             for msg in history[-6:]:
                 role = "User" if msg["role"] == "user" else "Assistant"
@@ -668,6 +709,8 @@ if analysis_trigger:
 
     # RNFLT analysis
     label_r = None
+    rnflt_quality = None
+    rnflt_quality_meta = {}
     if rnflt_arr is not None:
         try:
             metrics = rnflt_metrics or {}
@@ -693,20 +736,18 @@ if analysis_trigger:
 
             severity_overall = max(severity_overall, float(sev))
 
+            # Quality for RNFLT map
+            q, meta = compute_quality_from_array(rnflt_arr)
+            rnflt_quality = q
+            rnflt_quality_meta = meta
+
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Status", label_r)
             c2.metric("Mean RNFLT", f"{metrics.get('mean',0):.2f}")
             c3.metric("Std Dev", f"{metrics.get('std',0):.2f}")
             c4.metric("Cluster", str(cluster))
 
-            st.markdown(render_severity := """
-            <div style="width:100%; text-align:center; margin-top:10px;">
-                <div style="width:100%; max-width:900px; margin:auto; height:24px; background:rgba(0,255,0,0.08); border-radius:18px; border:1px solid rgba(0,255,0,0.18); overflow:hidden;">
-                    <div style="height:100%; width:40%; background:linear-gradient(90deg,#39ff14,#b8ff8a); box-shadow:0 0 30px #39ff14;"></div>
-                </div>
-                <div style="margin-top:8px; font-size:16px; color:#b8ffb8;"><b>{:.1f}% Severity</b></div>
-            </div>
-            """.format(sev), unsafe_allow_html=True)
+            st.markdown(f"**RNFLT Scan Quality:** {rnflt_quality:.1f}% — (sharp:{meta['sharp_score']:.1f}, snr:{meta['snr_score']:.1f})")
 
             # Build RNFLT figure (3 panel)
             fig, axes = plt.subplots(1, 3, figsize=(16,5))
@@ -725,10 +766,17 @@ if analysis_trigger:
     # B-scan analysis
     label_b = None
     conf = 0.0
+    bscan_quality = None
+    bscan_quality_meta = {}
     if bscan_file:
         try:
             pil = Image.open(bscan_file).convert("L")
             batch, proc = preprocess_bscan(pil)
+            # quality for B-scan
+            q_b, meta_b = compute_quality_from_image_pil(pil)
+            bscan_quality = q_b
+            bscan_quality_meta = meta_b
+
             if b_model is not None:
                 try:
                     pred_raw = float(b_model.predict(batch, verbose=0)[0][0])
@@ -744,6 +792,7 @@ if analysis_trigger:
             col1, col2 = st.columns(2)
             col1.metric("CNN Prediction", label_b)
             col2.metric("Confidence", f"{conf:.2f}%")
+            st.markdown(f"**B-scan Quality:** {bscan_quality:.1f}% — (sharp:{bscan_quality_meta['sharp_score']:.1f}, snr:{bscan_quality_meta['snr_score']:.1f})")
 
             # Grad-CAM visualization if model exists
             heat = gradcam(batch, b_model) if b_model is not None else None
@@ -768,7 +817,6 @@ if analysis_trigger:
     # Overall severity display
     st.markdown("<hr>", unsafe_allow_html=True)
     st.markdown(f"<h3 style='text-align:center; color:#39ff14;'>Overall Severity Index</h3>", unsafe_allow_html=True)
-    # re-use simple progress display
     st.markdown(f"<div style='text-align:center; color:#b8ffb8; font-weight:700;'>{severity_overall:.1f}%</div>", unsafe_allow_html=True)
 
     # Offer downloads & save context for PDF
@@ -782,13 +830,14 @@ if analysis_trigger:
             "rnflt_cluster": label_r,
             "rnflt_severity": severity_overall,
             "bscan_label": label_b,
-            "bscan_conf": conf
+            "bscan_conf": conf,
+            "quality": float(np.mean([v for v in [rnflt_quality, bscan_quality] if v is not None]) if (rnflt_quality or bscan_quality) else 0.0)
         }
 
         if st.button("📄 Generate Full Medical Report (PDF)"):
             st.session_state.trigger_pdf = True
 
-    # Allow saving run to DB
+    # Allow saving run to DB (with quality)
     st.markdown("<hr>", unsafe_allow_html=True)
     st.subheader("Save run to history (local SQLite)")
     patient_name = st.text_input("Patient name (optional)", key="patient_name_save")
@@ -796,7 +845,9 @@ if analysis_trigger:
     if st.button("💾 Save run"):
         try:
             png_save = fig_to_png(figs[0]) if len(figs)>0 else None
-            save_run(patient_name or '-', patient_id or '-', rnflt_metrics or {}, severity_overall, quality=0.0, bscan_label=label_b, bscan_conf=conf, png_bytes=png_save)
+            # quality: use rnflt_quality if present else bscan_quality else 0
+            quality_to_save = rnflt_quality if rnflt_quality is not None else (bscan_quality if bscan_quality is not None else 0.0)
+            save_run(patient_name or '-', patient_id or '-', rnflt_metrics or {}, severity_overall, quality=quality_to_save, bscan_label=label_b, bscan_conf=conf, png_bytes=png_save)
             st.success("Run saved to local history.")
         except Exception as e:
             st.error(f"Error saving run: {e}")
@@ -814,7 +865,8 @@ if st.session_state.get("trigger_pdf", False):
             rnflt_cluster=pdf_ctx.get("rnflt_cluster"),
             rnflt_severity=pdf_ctx.get("rnflt_severity"),
             bscan_label=pdf_ctx.get("bscan_label"),
-            bscan_conf=pdf_ctx.get("bscan_conf")
+            bscan_conf=pdf_ctx.get("bscan_conf"),
+            quality=pdf_ctx.get("quality")
         )
         st.session_state.trigger_pdf = False
         st.success("PDF generated.")
@@ -823,7 +875,7 @@ if st.session_state.get("trigger_pdf", False):
         st.error(f"PDF generation error: {e}")
 
 # ============================================================
-# Saved runs list
+# Saved runs list + Progression Analysis UI
 # ============================================================
 st.markdown("---")
 st.subheader("Saved Runs (recent)")
@@ -834,7 +886,7 @@ if runs:
         cols = st.columns([3,1,1])
         with cols[0]:
             st.markdown(f"**{rpatient}** (ID: {rpid}) — {rts}")
-            st.markdown(f"Severity: {rsev:.2f}% — Metrics: {rmetrics}")
+            st.markdown(f"Severity: {rsev:.2f}% — Quality: {rqual:.1f}% — Metrics: {rmetrics}")
         with cols[1]:
             if st.button(f"⬇️ Download PNG #{rid}", key=f"dl_{rid}"):
                 pngb = load_run_png(rid)
@@ -842,7 +894,6 @@ if runs:
                     st.download_button(f"Download run {rid} PNG", data=pngb, file_name=f"oculaire_run_{rid}.png", mime="image/png")
         with cols[2]:
             if st.button(f"🗑️ Delete #{rid}", key=f"del_{rid}"):
-                # simple delete function
                 try:
                     with db_cursor() as (conn, c):
                         c.execute("DELETE FROM runs WHERE id=?", (rid,))
@@ -851,6 +902,147 @@ if runs:
                     st.error(f"Delete error: {e}")
 else:
     st.info("No saved runs yet — run analysis and save a run to populate history.")
+
+# Progression Analysis section
+st.markdown("---")
+st.subheader("Progression Analysis (compare saved runs for a patient)")
+
+# Build selection list of patients (unique patient or patient_id)
+def get_unique_patients():
+    rows = list_runs(limit=500)
+    seen = {}
+    for r in rows:
+        _, p, pid, ts, metrics, sev, qual = r
+        key = f"{p} ({pid})"
+        if key not in seen:
+            seen[key] = (p, pid)
+    return list(seen.items())  # [(key, (p,pid)), ...]
+
+patients = get_unique_patients()
+patient_keys = [k for k,_ in patients]
+sel = None
+if patients:
+    sel_key = st.selectbox("Select patient (name (ID))", ["-- choose --"] + patient_keys)
+    if sel_key and sel_key != "-- choose --":
+        # find patient name and id
+        for k,v in patients:
+            if k == sel_key:
+                patient_name_sel, patient_id_sel = v
+                sel = (patient_name_sel, patient_id_sel)
+                break
+
+if sel:
+    st.markdown(f"### Progression for **{sel[0]}** (ID: {sel[1] or '-'})")
+    # fetch all runs for this patient
+    patient_runs = list_runs_for_patient(sel[0], sel[1])
+    if not patient_runs:
+        st.info("No runs found for this patient.")
+    else:
+        # parse times, severities, metrics
+        times = []
+        severities = []
+        means = []
+        run_ids = []
+        qualities = []
+        for rr in patient_runs:
+            rid, p, pid, ts, metrics_json, sev, qual = rr
+            try:
+                dt = datetime.fromisoformat(ts)
+            except Exception:
+                # try parsing fallback
+                dt = datetime.strptime(ts.split('.')[0], "%Y-%m-%dT%H:%M:%S")
+            times.append(dt)
+            severities.append(float(sev or 0.0))
+            m = {}
+            try:
+                m = json.loads(metrics_json)
+            except Exception:
+                m = {}
+            means.append(float(m.get("mean", np.nan)))
+            run_ids.append(rid)
+            qualities.append(float(qual or 0.0))
+
+        # Ensure arrays are sorted by time
+        order = np.argsort(times)
+        times = [times[i] for i in order]
+        severities = [severities[i] for i in order]
+        means = [means[i] for i in order]
+        run_ids = [run_ids[i] for i in order]
+        qualities = [qualities[i] for i in order]
+
+        # Plot severity over time
+        fig_s, ax_s = plt.subplots(figsize=(8,3.5))
+        ax_s.plot(times, severities, marker='o', linewidth=2)
+        ax_s.set_title("Severity Index over time")
+        ax_s.set_ylabel("Severity (%)")
+        ax_s.set_xlabel("Date")
+        ax_s.grid(True, alpha=0.2)
+        # simple trend line
+        try:
+            x = np.array([dt.timestamp() for dt in times])
+            y = np.array(severities)
+            if len(x) >= 2:
+                p = np.polyfit(x, y, 1)
+                yfit = np.polyval(p, x)
+                ax_s.plot(times, yfit, linestyle='--', label=f"trend slope {p[0]*86400:.3f} %/day")
+                ax_s.legend()
+                slope_per_day = float(p[0]*86400)
+            else:
+                slope_per_day = 0.0
+        except Exception:
+            slope_per_day = 0.0
+        st.pyplot(fig_s)
+
+        # Plot mean RNFLT over time (if any values available)
+        if not all(np.isnan(means)):
+            fig_m, ax_m = plt.subplots(figsize=(8,3.5))
+            ax_m.plot(times, means, marker='o', linewidth=2)
+            ax_m.set_title("Mean RNFLT over time")
+            ax_m.set_ylabel("Mean RNFLT (μm)")
+            ax_m.set_xlabel("Date")
+            ax_m.grid(True, alpha=0.2)
+            try:
+                x = np.array([dt.timestamp() for dt in times])
+                y = np.array(means)
+                if len(x) >= 2 and not np.all(np.isnan(y)):
+                    p = np.polyfit(x[~np.isnan(y)], y[~np.isnan(y)], 1)
+                    yfit = np.polyval(p, x)
+                    ax_m.plot(times, yfit, linestyle='--', label=f"trend slope {p[0]*86400:.3f} μm/day")
+                    ax_m.legend()
+                    mean_slope_per_day = float(p[0]*86400)
+                else:
+                    mean_slope_per_day = 0.0
+            except Exception:
+                mean_slope_per_day = 0.0
+            st.pyplot(fig_m)
+        else:
+            st.info("No RNFLT numeric means available for this patient to show mean trend.")
+
+        # Show a small summary interpretation
+        st.markdown("#### Interpretation & Recommendation")
+        interp = ""
+        if slope_per_day > 0.05:
+            interp += "- Severity is **increasing** over time (worsening). Recommend urgent ophthalmology review and closer follow-up.\n"
+        elif slope_per_day < -0.05:
+            interp += "- Severity is **decreasing** over time (improving). Continue current management and monitor.\n"
+        else:
+            interp += "- Severity is **stable** over the recorded period. Continue routine follow-up as advised.\n"
+
+        if 'mean_slope_per_day' in locals():
+            if mean_slope_per_day < -0.02:
+                interp += "- Mean RNFLT shows a declining trend (thinning). Consider earlier clinical evaluation and additional testing.\n"
+            elif mean_slope_per_day > 0.02:
+                interp += "- Mean RNFLT shows slight increase (could be variability). Keep records for trend analysis.\n"
+
+        # Add quality-based suggestion
+        avg_quality = np.mean(qualities) if len(qualities)>0 else np.nan
+        if not np.isnan(avg_quality):
+            if avg_quality < 40:
+                interp += f"- Average scan quality for this patient is low ({avg_quality:.1f}%). Consider re-scanning with improved acquisition (stabilize fixation, reduce motion, improve focus).\n"
+            else:
+                interp += f"- Average scan quality: {avg_quality:.1f}% — acceptable for trend monitoring.\n"
+
+        st.markdown(interp)
 
 # ============================================================
 # Floating chatbot expander
