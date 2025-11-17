@@ -1,7 +1,8 @@
-# app.py — OCULAIRE Neon Lab v5 (RNFLT image upload + Streamlit-only chat)
+# app.py — OCULAIRE Neon Lab v6 (full file)
 # Run: streamlit run app.py
 
 import streamlit as st
+import streamlit.components.v1 as components
 import numpy as np
 import joblib
 import tensorflow as tf
@@ -30,15 +31,15 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    page_icon="👁️")
 
 # -----------------------
-# Initialize Session State for Chat
+# Session state init
 # -----------------------
-if 'chat_history' not in st.session_state:
+if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-if 'last_processed_q' not in st.session_state:
+if "last_processed_q" not in st.session_state:
     st.session_state.last_processed_q = None
 
 # -----------------------
-# Get API key from Streamlit secrets or environment variable
+# Helpers: get API key
 # -----------------------
 def get_api_key():
     try:
@@ -53,7 +54,12 @@ def get_api_key():
 API_KEY = get_api_key()
 
 # -----------------------
-# Matplotlib / theme config
+# Display config
+# -----------------------
+display_width = 640  # width for B-scan preview and overlay
+
+# -----------------------
+# Matplotlib neon style
 # -----------------------
 plt.style.use('dark_background')
 plt.rcParams.update({
@@ -69,7 +75,7 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — Neon Theme + animations
+# CSS — neon
 # -----------------------
 st.markdown("""
 <style>
@@ -85,148 +91,81 @@ st.markdown("""
   color: #e6faff;
   font-family: 'Plus Jakarta Sans', Inter, system-ui;
 }
+/* Header */
 .header { text-align:center; margin-top:10px; margin-bottom:10px; }
-.header h1 {
-  font-size:42px; font-weight:900; letter-spacing:3px;
+.header h1 { font-size:42px; font-weight:900; letter-spacing:3px;
   background: linear-gradient(90deg, var(--neonA), var(--neonB));
   -webkit-background-clip:text; -webkit-text-fill-color:transparent;
   text-shadow: 0 0 20px rgba(0,245,255,0.8), 0 0 35px rgba(255,64,196,0.5);
 }
-.header h3 { color:var(--muted); font-weight:400; font-size:15px; text-shadow: 0 0 12px rgba(255,255,255,0.2); }
+.header h3 { color:var(--muted); font-weight:400; font-size:15px; }
+
+/* Card */
 .card {
   background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
   border:1px solid rgba(255,255,255,0.05);
   box-shadow: 0 0 25px rgba(0,245,255,0.05), 0 0 35px rgba(255,64,196,0.05);
   border-radius:12px; padding:16px;
 }
-.metric-label { color:var(--muted); font-size:12px; }
-.large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.5); }
 
-/* Severity Bar — make it long and animated faster */
-.sev-wrap { margin-top:16px; width:95%; margin-left:auto; margin-right:auto; }
-.sev-outer { height:18px; width:100%; background: rgba(255,255,255,0.03); border-radius:14px; overflow:hidden; }
+/* Severity bar: longer and faster beat */
+.sev-wrap { margin-top:16px; }
+.sev-outer { height:18px; width:92%; margin: 0 auto; background: rgba(255,255,255,0.03); border-radius:14px; overflow:hidden; }
 .sev-inner {
   height:100%; width:0%;
   background: linear-gradient(90deg,var(--neonA),var(--neonB));
   border-radius:14px;
   box-shadow: 0 0 25px rgba(0,245,255,0.6), 0 0 25px rgba(255,64,196,0.5);
-  transition: width 0.8s ease-in-out;
-  animation: sev-beat 1.2s infinite ease-in-out;
-}
-@keyframes sev-beat {
-  0% { transform: scaleX(1); }
-  50% { transform: scaleX(1.01); }
-  100% { transform: scaleX(1); }
+  transition: width 0.6s ease-in-out;
 }
 .sev-chip {
-  margin-top:10px; display:inline-block;
-  padding:6px 12px; border-radius:14px;
+  margin-top:6px; display:inline-block;
+  padding:8px 14px; border-radius:16px;
   font-weight:800; font-size:14px; color:#021617;
   background: linear-gradient(90deg, rgba(0,245,255,0.95), rgba(255,64,196,0.95));
-  box-shadow: 0 0 20px rgba(0,245,255,0.4), 0 0 20px rgba(255,64,196,0.3);
+  box-shadow: 0 0 30px rgba(0,245,255,0.25), 0 0 40px rgba(255,64,196,0.2);
+  animation: pulse 1s infinite;
 }
+@keyframes pulse { 0%{transform:scale(1);} 50%{transform:scale(1.06);} 100%{transform:scale(1);} }
 
-/* Chat message styling */
-.user-msg {
-  background: linear-gradient(135deg, rgba(0,245,255,0.12), rgba(0,245,255,0.05));
-  border-left: 3px solid var(--neonA);
-  padding: 12px;
-  border-radius: 8px;
-  margin: 8px 0;
-}
-.assistant-msg {
-  background: linear-gradient(135deg, rgba(255,64,196,0.12), rgba(255,64,196,0.05));
-  border-left: 3px solid var(--neonB);
-  padding: 12px;
-  border-radius: 8px;
-  margin: 8px 0;
-}
-.chat-header {
-  text-align: center;
-  background: linear-gradient(90deg, var(--neonA), var(--neonB));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  font-weight: 800;
-  font-size: 24px;
-  margin-bottom: 12px;
-  text-shadow: 0 0 20px rgba(0,245,255,0.3);
-}
-
-/* Floating Chat Expander at Bottom — neon beating */
-.floating-expander {
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 20px !important;
-  width: 460px !important;
-  max-width: 92vw !important;
-  z-index: 9999 !important;
-  animation: float 3s ease-in-out infinite !important;
-}
-@keyframes float { 0%,100%{transform:translateY(0);}50%{transform:translateY(-6px);} }
-
-.floating-expander details {
-  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
-  border: 2px solid rgba(0,245,255,0.35) !important;
-  border-radius: 14px !important;
-  animation: neon-pulse 1.8s ease-in-out infinite !important;
-}
-@keyframes neon-pulse {
-  0% { box-shadow: 0 8px 30px rgba(0,245,255,0.08); }
-  50% { box-shadow: 0 14px 50px rgba(0,245,255,0.16); }
-  100% { box-shadow: 0 8px 30px rgba(0,245,255,0.08); }
-}
+/* Floating expander neon style (summary label changed later) */
 .floating-expander details summary {
-  background: linear-gradient(135deg, rgba(0,245,255,0.12), rgba(255,64,196,0.12)) !important;
-  padding: 14px !important;
-  border-radius: 12px !important;
+  background: linear-gradient(135deg, rgba(0,245,255,0.25), rgba(255,64,196,0.25)) !important;
+  padding: 16px !important;
+  border-radius: 14px !important;
   cursor: pointer !important;
   font-weight: 800 !important;
-  font-size: 16px !important;
+  font-size: 18px !important;
   color: #e6faff !important;
   display: flex !important;
   align-items: center !important;
   gap: 10px !important;
+  transition: all 0.3s ease !important;
 }
-.floating-expander details summary::before {
-  content: "💬";
-  font-size: 20px;
-  display: inline-block;
-  margin-right: 6px;
-}
+.floating-expander details summary::before { content: "💬"; font-size:24px; margin-right:6px; }
+
+/* Hide default footer */
 footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
 
 # -----------------------
-# Model name for REST (if using)
+# Chat assistant function
 # -----------------------
-MODEL_NAME = "models/gemini-2.5-pro"  # adjust as needed
+MODEL_NAME = "models/gemini-2.5-pro"
 
-# -----------------------
-# Chatbot function
-# -----------------------
 def ask_glaucoma_assistant(question, history, api_key):
     """Call Google Gemini API with glaucoma-specific context"""
     if not api_key or not api_key.strip():
         return "⚠️ Please configure your Google Gemini API key (see sidebar)."
-
-    system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
-Your role:
-- Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment
-- Provide accurate, evidence-based information about glaucoma
-- Explain medical terminology clearly
-- If asked about non-glaucoma topics, politely redirect to glaucoma-related questions
-- Keep responses concise and under 200 words
-- Always include a brief disclaimer that you're providing educational information, not medical advice
-
-Important: Always remind users to consult healthcare professionals for medical decisions.
-"""
+    system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma.
+Answer only glaucoma/OCT/RNFLT related concise (<=200 words) educational info + brief disclaimer."""
     try:
         if USE_SDK:
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(MODEL_NAME)
+            model = genai.GenerativeModel(MODEL_NAME if MODEL_NAME else "gemini-1.5-flash")
             chat_history = []
-            for msg in history[-8:]:
+            for msg in history[-6:]:
                 role = "user" if msg["role"] == "user" else "model"
                 chat_history.append({"role": role, "parts": [msg["content"]]})
             chat = model.start_chat(history=chat_history)
@@ -234,7 +173,7 @@ Important: Always remind users to consult healthcare professionals for medical d
             return response.text
         else:
             conversation_context = ""
-            for msg in history[-8:]:
+            for msg in history[-6:]:
                 role = "User" if msg["role"] == "user" else "Assistant"
                 conversation_context += f"{role}: {msg['content']}\n\n"
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
@@ -244,120 +183,81 @@ Important: Always remind users to consult healthcare professionals for medical d
                 headers={"Content-Type": "application/json"},
                 json={
                     "contents": [{"parts": [{"text": full_prompt}]}],
-                    "generationConfig": {"temperature": 0.6, "maxOutputTokens": 400}
+                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 400}
                 },
                 timeout=30
             )
             if response.status_code == 200:
                 data = response.json()
-                # Defensive access
-                try:
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
-                except Exception:
-                    return json.dumps(data)[:1000]
+                return data["candidates"][0]["content"]["parts"][0]["text"]
             elif response.status_code == 403:
-                return "🔑 API key invalid or restricted. Create an unrestricted key in Google AI Studio."
+                return "🔑 API key invalid. Check key or restrictions."
             else:
-                return f"❌ Error ({response.status_code}): {response.text[:300]}"
+                return f"❌ API Error ({response.status_code})"
     except Exception as e:
-        return f"❌ Error calling Gemini: {e}"
+        return f"❌ Error: {str(e)}"
 
 # -----------------------
-# Load Models & resources (cached)
+# Load models/resources (cached)
 # -----------------------
 @st.cache_resource
-def load_models_and_refs():
-    # Load bscan model if available
+def load_models():
+    b_model = None
+    scaler = kmeans = avg_healthy = avg_glaucoma = thin_cluster = None
     try:
         b_model = tf.keras.models.load_model("bscan_cnn.h5", compile=False)
     except Exception:
         b_model = None
-    # Load scaler and kmeans if available (used previously with npz pipeline)
     try:
         scaler = joblib.load("rnflt_scaler.joblib")
         kmeans = joblib.load("rnflt_kmeans.joblib")
-    except Exception:
-        scaler = None
-        kmeans = None
-    # Load avg maps used for diff/risk (if present)
-    try:
         avg_healthy = np.load("avg_map_healthy.npy")
         avg_glaucoma = np.load("avg_map_glaucoma.npy")
+        thin_cluster = 0 if np.nanmean(avg_healthy) > np.nanmean(avg_glaucoma) else 1
     except Exception:
-        avg_healthy = None
-        avg_glaucoma = None
-    return b_model, scaler, kmeans, avg_healthy, avg_glaucoma
+        scaler = kmeans = avg_healthy = avg_glaucoma = thin_cluster = None
+    return b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster
 
-b_model, scaler, kmeans, avg_healthy, avg_glaucoma = load_models_and_refs()
+b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models()
 
 # -----------------------
-# Helpers: RNFLT image processor (new)
+# Helper functions
 # -----------------------
-def process_rnflt_image(f):
-    """
-    Accepts a Streamlit UploadedFile or file-like and returns normalized RNFLT numpy array and metrics.
-    Strategy:
-      - Load grayscale
-      - Normalize to [0,1], then scale to µm-like range (we choose 0-110)
-      - Return arr (float) and metrics dict
-    """
+def process_npz_file(file_like):
     try:
-        # read bytes (works for UploadFile)
-        if hasattr(f, "getvalue"):
-            content = f.getvalue()
-            buf = io.BytesIO(content)
-            img = Image.open(buf).convert("L")
+        buf = io.BytesIO(file_like.getvalue())
+        data = np.load(buf, allow_pickle=True)
+        if "volume" in data:
+            arr = data["volume"]
         else:
-            img = Image.open(f).convert("L")
-        arr = np.array(img).astype(float)
-
-        # mask central black optic disc: preserve but it's already dark; keep as-is
-        # normalize robustly
-        lo = np.nanpercentile(arr, 2)
-        hi = np.nanpercentile(arr, 99)
-        arr_clipped = np.clip(arr, lo, hi)
-        arr_norm = (arr_clipped - lo) / (hi - lo + 1e-9)
-        # scale to microns-like range (tweakable)
-        arr_microns = arr_norm * 110.0  # 0 - 110 µm approximate scale
-        metrics = {
-            "mean": float(np.nanmean(arr_microns)),
-            "std": float(np.nanstd(arr_microns)),
-            "min": float(np.nanmin(arr_microns)),
-            "max": float(np.nanmax(arr_microns)),
-            "shape": arr_microns.shape
-        }
-        return arr_microns, metrics
+            # take first array in archive
+            arr = data[data.files[0]]
+        if arr.ndim == 3:
+            arr = arr[0, :, :]
+        vals = arr.flatten().astype(float)
+        metrics = {"mean": np.nanmean(vals), "std": np.nanstd(vals), "min": np.nanmin(vals), "max": np.nanmax(vals)}
+        return arr, metrics
     except Exception as e:
-        st.error(f"Error reading RNFLT image: {e}")
+        st.error(f"NPZ read error: {e}")
         return None, None
 
-def compute_risk_map(rnflt, healthy, threshold=-10):
-    """
-    rnflt: 2D float array
-    healthy: reference healthy average map or None
-    threshold: µm difference threshold (negative means thinner)
-    """
+def process_image_rnflt(file_like):
     try:
-        if healthy is None:
-            # create dummy healthy: mean of rnflt as baseline
-            healthy_resized = np.full_like(rnflt, np.nanmean(rnflt))
-        else:
-            healthy_resized = cv2.resize(healthy, (rnflt.shape[1], rnflt.shape[0]))
-        diff = rnflt - healthy_resized
-        risk = np.where(diff < threshold, diff, np.nan)
-        total = np.isfinite(diff).sum()
-        risky = np.isfinite(risk).sum()
-        severity = (risky / total) * 100 if total else 0.0
-        return diff, risk, severity
+        image = Image.open(file_like).convert("L")  # single channel
+        arr = np.array(image).astype(float)
+        # normalize similar to npz processing
+        vals = arr.flatten()
+        metrics = {"mean": float(np.nanmean(vals)), "std": float(np.nanstd(vals)), "min": float(np.nanmin(vals)), "max": float(np.nanmax(vals))}
+        return arr, metrics, image
     except Exception as e:
-        st.error(f"Error computing risk map: {e}")
-        return None, None, 0.0
+        st.error(f"RNFLT image read error: {e}")
+        return None, None, None
 
-def preprocess_bscan(image_pil, size=(224,224)):
-    arr = np.array(image_pil.convert('L'))
+def preprocess_bscan(image_pil, size=(320,320)):
+    arr = np.array(image_pil.convert('L')).astype(np.float32)
     arr = np.clip(arr, 0, np.percentile(arr, 99))
     arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-6)
-    arr_res = cv2.resize(arr, size, interpolation=cv2.INTER_NEAREST)
+    arr_res = cv2.resize(arr, size, interpolation=cv2.INTER_LINEAR)
     arr_rgb = np.repeat(arr_res[..., None], 3, axis=-1)
     batch = np.expand_dims(arr_rgb, axis=0).astype(np.float32)
     return batch, arr_res
@@ -374,6 +274,7 @@ def gradcam(batch, model):
         grad_model = tf.keras.models.Model(model.inputs, [model.get_layer(last_conv).output, model.output])
         with tf.GradientTape() as tape:
             conv_out, preds = grad_model(batch)
+            # assume binary pred at index 0
             loss = preds[:, 0]
         grads = tape.gradient(loss, conv_out)
         pooled = tf.reduce_mean(grads, axis=(0,1,2))
@@ -399,7 +300,7 @@ def create_pdf(figs):
     buf.seek(0)
     return buf.getvalue()
 
-def render_severity(pct):
+def render_severity_html(pct):
     pct = max(0.0, min(100.0, float(pct)))
     html = f"""
     <div class='sev-wrap'>
@@ -407,44 +308,79 @@ def render_severity(pct):
       <div style='text-align:center'><div class='sev-chip'>{pct:.1f}%</div></div>
     </div>
     <script>
-      setTimeout(function(){{
-        var el=document.getElementById('sev_inner');
-        if(el) el.style.width='{pct:.1f}%';
-      }},120);
+      (function(){{
+        setTimeout(function(){{
+          var el=document.getElementById('sev_inner');
+          if(el) el.style.width='{pct:.1f}%';
+        }},80);
+      }})();
     </script>
     """
     return html
 
 # -----------------------
-# Sidebar — API status & instructions
+# Sidebar: RNFLT input type & converter UI
 # -----------------------
-with st.sidebar:
-    st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
-    if API_KEY:
-        st.success("✅ Gemini API Key configured")
-        st.info("Using API key from secrets/environment")
-    else:
-        st.error("❌ No API Key found")
-        st.warning("Chatbot will not work without an API key")
+st.sidebar.title("RNFLT Input & Tools")
+rnflt_input_mode = st.sidebar.radio("RNFLT input type", ["NPZ (recommended)", "Image (single RNFLT image)"])
 
-    st.markdown("---")
-    st.markdown("""
-    <div style='font-size:12px; color:var(--muted);'>
-    <strong>How to configure Gemini API key (Streamlit Cloud):</strong><br><br>
-    1. App settings → Secrets<br>
-    2. Add <code>GEMINI_API_KEY = "your-key"</code><br><br>
-    For local testing: export GEMINI_API_KEY or create .streamlit/secrets.toml
-    </div>
-    """, unsafe_allow_html=True)
+st.sidebar.markdown("---")
+st.sidebar.subheader("Image → NPZ converter")
+st.sidebar.markdown("If you only have RNFLT slice images, upload a sequence (PNG/JPG). I'll pack them into a `volume` and let you download `.npz`.")
+conv_files = st.sidebar.file_uploader("Upload RNFLT slice images (ordered)", accept_multiple_files=True, type=["png","jpg","jpeg"])
+if conv_files:
+    if st.sidebar.button("Convert to .npz and download"):
+        try:
+            stacks = []
+            for f in conv_files:
+                im = Image.open(f).convert("L")
+                arr = np.array(im).astype(np.float32)
+                stacks.append(arr)
+            vol = np.stack(stacks, axis=0)  # shape (N, H, W)
+            buf = io.BytesIO()
+            np.savez_compressed(buf, volume=vol)
+            buf.seek(0)
+            st.sidebar.success(f"Packed {len(stacks)} slices into volume with shape {vol.shape}")
+            st.sidebar.download_button("⬇️ Download RNFLT volume (.npz)", data=buf.getvalue(), file_name="rnflt_volume.npz", mime="application/octet-stream")
+        except Exception as e:
+            st.sidebar.error(f"Conversion error: {e}")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("⚠️ Use NPZ if possible for full RNFLT maps. Images are supported but may lose metadata.")
 
 # -----------------------
-# RNFLT / B-scan upload UI (now image-based RNFLT)
+# Header
+# -----------------------
+st.markdown("""
+<div class="header">
+  <h1>👁️ OCULAIRE</h1>
+  <h3>AI-Powered Glaucoma Detection Dashboard — Neon Lab v6</h3>
+</div>
+""", unsafe_allow_html=True)
+st.markdown("---")
+
+# -----------------------
+# Input upload area
 # -----------------------
 colA, colB = st.columns(2)
+
 with colA:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.subheader("🩺 RNFLT Map Analysis (Image)")
-    rnflt_file = st.file_uploader("Upload RNFLT Map (png/jpg/jpeg)", type=["png","jpg","jpeg"])
+    st.subheader("🩺 RNFLT Map Analysis")
+    if rnflt_input_mode == "NPZ (recommended)":
+        rnflt_file = st.file_uploader("Upload RNFLT file (.npz)", type=["npz"])
+        rnflt_arr = None
+        rnflt_metrics = None
+        if rnflt_file:
+            rnflt_arr, rnflt_metrics = process_npz_file(rnflt_file)
+    else:
+        rnflt_img_file = st.file_uploader("Upload RNFLT image (single grayscale RNFLT)", type=["png","jpg","jpeg"])
+        rnflt_arr = None
+        rnflt_metrics = None
+        rnflt_pil = None
+        if rnflt_img_file:
+            rnflt_arr, rnflt_metrics, rnflt_pil = process_image_rnflt(rnflt_img_file)
+
     st.markdown("</div>", unsafe_allow_html=True)
 
 with colB:
@@ -456,79 +392,77 @@ with colB:
 threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
 # -----------------------
-# ANALYSIS (RNFLT image processing + B-scan)
+# ANALYSIS pipeline
 # -----------------------
-if rnflt_file or bscan_file:
+if rnflt_arr is not None or bscan_file is not None:
     figs = []
     severity_overall = 0.0
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # RNFLT Image Processing
-    if rnflt_file:
-        rnflt_map, metrics = process_rnflt_image(rnflt_file)
-        if rnflt_map is not None:
-            # Attempt to label using existing scaler/kmeans if available; otherwise simple threshold heuristic
+    # RNFLT processing
+    if rnflt_arr is not None:
+        try:
+            metrics = rnflt_metrics
+            X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
+            label_r = "Unknown"
             if scaler is not None and kmeans is not None:
-                try:
-                    X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
-                    Xs = scaler.transform(X)
-                    cluster = int(kmeans.predict(Xs)[0])
-                    # infer thin cluster from loaded avg maps if possible
-                    thin_cluster_guess = 0
-                    if avg_healthy is not None and avg_glaucoma is not None:
-                        thin_cluster_guess = 0 if np.nanmean(avg_healthy) > np.nanmean(avg_glaucoma) else 1
-                    label_r = "Glaucoma-like" if cluster == thin_cluster_guess else "Healthy-like"
-                except Exception:
-                    cluster = "-"
-                    label_r = "Unknown"
+                Xs = scaler.transform(X)
+                cluster = int(kmeans.predict(Xs)[0])
+                label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
             else:
-                # simple heuristic using mean RNFLT (adjust threshold as appropriate)
-                cluster = "-"
-                label_r = "Glaucoma-like" if metrics["mean"] < 65 else "Healthy-like"
-
-            # compute risk/diff maps — average healthy will be resized if present
-            diff, risk, sev = compute_risk_map(rnflt_map, avg_healthy, -threshold)
-            severity_overall = max(severity_overall, sev)
-
+                cluster = "?"
+                label_r = "Unknown (no clustering model)"
+            # compute diff/risk using avg_healthy if available
+            if avg_healthy is not None:
+                # ensure shapes match
+                healthy = avg_healthy
+                if rnflt_arr.shape != healthy.shape:
+                    healthy = cv2.resize(healthy, (rnflt_arr.shape[1], rnflt_arr.shape[0]))
+                diff = rnflt_arr - healthy
+                risk = np.where(diff < -threshold, diff, np.nan)
+                total = np.isfinite(diff).sum()
+                risky = np.isfinite(risk).sum()
+                sev = (risky / total) * 100 if total else 0.0
+            else:
+                diff = rnflt_arr - np.nanmean(rnflt_arr)
+                risk = np.where(diff < -threshold, diff, np.nan)
+                sev = np.nanpercentile(np.nan_to_num(diff), 75)
+            severity_overall = max(severity_overall, float(sev))
             # display metrics
             m1, m2, m3, m4 = st.columns([2,2,2,2])
-            m1.markdown(f"<div class='metric-label'>Status</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_r else '✅'} {label_r}</div>", unsafe_allow_html=True)
-            m2.markdown(f"<div class='metric-label'>Mean RNFLT (µm)</div><div class='large-metric'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
-            m3.markdown(f"<div class='metric-label'>Std Dev</div><div class='large-metric'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
-            m4.markdown(f"<div class='metric-label'>Cluster</div><div class='large-metric'>{cluster}</div>", unsafe_allow_html=True)
+            m1.markdown(f"<div style='color:var(--muted); font-size:12px;'>Status</div><div style='font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 12px rgba(0,245,255,0.6);'>{'🚨' if 'Glaucoma' in label_r else '✅'} {label_r}</div>", unsafe_allow_html=True)
+            m2.markdown(f"<div style='color:var(--muted); font-size:12px;'>Mean RNFLT</div><div style='font-weight:800; font-size:22px; color:#fff;'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
+            m3.markdown(f"<div style='color:var(--muted); font-size:12px;'>Std Dev</div><div style='font-weight:800; font-size:22px; color:#fff;'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
+            m4.markdown(f"<div style='color:var(--muted); font-size:12px;'>Cluster</div><div style='font-weight:800; font-size:22px; color:#fff;'>{cluster}</div>", unsafe_allow_html=True)
 
-            st.markdown(render_severity(sev), unsafe_allow_html=True)
+            # show RNFLT map image (display bigger)
+            try:
+                rnflt_img_show = Image.fromarray(np.uint8(255 * (rnflt_arr - np.nanmin(rnflt_arr)) / (np.nanmax(rnflt_arr) - np.nanmin(rnflt_arr) + 1e-9)))
+                st.image(rnflt_img_show, caption="RNFLT map (preview)", width=display_width)
+            except Exception:
+                pass
 
-            # Visualize RNFLT, diff, risk
-            fig, axes = plt.subplots(1,3,figsize=(18,6),constrained_layout=True)
-            ax0, ax1, ax2 = axes
-            im0 = ax0.imshow(rnflt_map, cmap='gray')
-            ax0.axis('off'); ax0.set_title("Uploaded RNFLT (µm)")
-            plt.colorbar(im0, ax=ax0, shrink=0.8)
+            # show severity
+            st.markdown(render_severity_html(severity_overall), unsafe_allow_html=True)
 
-            if diff is not None:
-                im1 = ax1.imshow(diff, cmap='bwr', vmin=-40, vmax=40)
-                ax1.axis('off'); ax1.set_title("Difference (vs Healthy)")
-                plt.colorbar(im1, ax=ax1, shrink=0.8)
-            else:
-                ax1.axis('off'); ax1.set_title("Difference (n/a)")
-
-            if risk is not None:
-                im2 = ax2.imshow(risk, cmap='hot')
-                ax2.axis('off'); ax2.set_title("Risk Map (thin zones)")
-                plt.colorbar(im2, ax=ax2, shrink=0.8)
-            else:
-                ax2.axis('off'); ax2.set_title("Risk Map (n/a)")
-
+            # optional plots
+            fig, axes = plt.subplots(1,3,figsize=(18,5), constrained_layout=True)
+            axes[0].imshow(rnflt_arr, cmap='turbo'); axes[0].set_title("Uploaded RNFLT"); axes[0].axis('off')
+            axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30); axes[1].set_title("Difference (vs Healthy)"); axes[1].axis('off')
+            axes[2].imshow(risk, cmap='hot'); axes[2].set_title("Risk Map"); axes[2].axis('off')
+            for ax in axes:
+                ax.set_facecolor('#050612')
             fig.patch.set_facecolor("#050612")
             st.pyplot(fig)
             figs.append(fig)
+        except Exception as e:
+            st.error(f"Error in RNFLT section: {e}")
 
-    # B-Scan Processing
-    if bscan_file and b_model is not None:
+    # B-scan processing
+    if bscan_file is not None and b_model is not None:
         try:
             image_pil = Image.open(bscan_file).convert("L")
-            batch, proc = preprocess_bscan(image_pil)
+            batch, proc = preprocess_bscan(image_pil, size=(320,320))
             pred_raw = float(b_model.predict(batch, verbose=0)[0][0])
             label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
             conf = pred_raw*100 if label_b=="Glaucoma-like" else (1-pred_raw)*100
@@ -536,80 +470,88 @@ if rnflt_file or bscan_file:
 
             st.markdown("<hr>", unsafe_allow_html=True)
             m1, m2 = st.columns(2)
-            m1.markdown(f"<div class='metric-label'>CNN Prediction</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
-            m2.markdown(f"<div class='metric-label'>Confidence</div><div class='large-metric'>{conf:.2f}%</div>", unsafe_allow_html=True)
-            st.markdown(render_severity(conf), unsafe_allow_html=True)
+            m1.markdown(f"<div style='color:var(--muted); font-size:12px;'>CNN Prediction</div><div style='font-weight:800; font-size:22px; color:#fff;'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
+            m2.markdown(f"<div style='color:var(--muted); font-size:12px;'>Confidence</div><div style='font-weight:800; font-size:22px; color:#fff;'>{conf:.2f}%</div>", unsafe_allow_html=True)
+            st.markdown(render_severity_html(conf), unsafe_allow_html=True)
 
             heat = gradcam(batch, b_model)
             if heat is not None:
-                heat_r = cv2.resize(heat, (224,224))
-                hm = (heat_r * 255).astype(np.uint8)
-                hm_color = cv2.applyColorMap(hm, cv2.COLORMAP_JET)
-                overlay = (np.stack([proc]*3, axis=-1)*255).astype(np.uint8)
-                overlay = cv2.addWeighted(overlay, 0.6, hm_color, 0.4, 0)
-                st.image([image_pil, overlay], caption=["Original B-Scan", "Grad-CAM Overlay"], use_column_width=True)
+                # create heatmap overlay and upsample to display size
+                hm_small = (cv2.resize(heat, (proc.shape[1], proc.shape[0])) * 255).astype(np.uint8)
+                hm_color = cv2.applyColorMap(hm_small, cv2.COLORMAP_JET)
+                overlay_small = (np.stack([proc]*3, axis=-1) * 255).astype(np.uint8)
+                overlay_small = cv2.addWeighted(overlay_small, 0.6, hm_color, 0.4, 0)
+                # upscale to original B-scan image size for preview
+                orig_w, orig_h = image_pil.size
+                overlay_up = cv2.resize(overlay_small, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
+                overlay_pil = Image.fromarray(overlay_up)
+                st.image([image_pil.resize((display_width, int(display_width * orig_h / orig_w))), overlay_pil.resize((display_width, int(display_width * orig_h / orig_w)))],
+                         caption=["Original B-Scan (preview)", "Grad-CAM Overlay (preview)"], width=display_width)
+            else:
+                st.image(image_pil, caption="Original B-Scan", width=display_width)
         except Exception as e:
-            st.error(f"B-scan processing error: {e}")
+            st.error(f"B-scan error: {e}")
+    elif bscan_file is not None and b_model is None:
+        st.warning("B-scan model unavailable (bscan_cnn.h5 not found) — uploading still allowed but prediction/grad-cam disabled.")
 
-    # Combined severity display + downloads
+    # Combined severity header
     st.markdown("<hr>", unsafe_allow_html=True)
-    st.markdown(f"<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
-    st.markdown(render_severity(severity_overall), unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align:center'>Overall Severity Index</h3>", unsafe_allow_html=True)
+    st.markdown(render_severity_html(severity_overall), unsafe_allow_html=True)
 
+    # Download report buttons
     if figs:
         png_bytes = fig_to_png(figs[0])
         pdf_bytes = create_pdf(figs)
-        st.markdown("<div style='text-align:center'>", unsafe_allow_html=True)
+        st.markdown("<div style='text-align:center; margin-top:10px'>", unsafe_allow_html=True)
         st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
         st.download_button("📄 Download Full Report (PDF)", data=pdf_bytes, file_name="oculaire_report.pdf", mime="application/pdf")
         st.markdown("</div>", unsafe_allow_html=True)
 
-# Footer
 st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v6 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
 # Floating Expander Chat (Streamlit-only, no JS navigation)
 # -----------------------
 st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
+# change label to "💬 Ask AI assistant" with neon look (CSS above)
 with st.expander("💬 Ask AI assistant", expanded=False):
-    st.markdown("<div class='chat-header'>🤖 OCULAIRE Assistant</div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:8px;'>Ask me about glaucoma, OCT, RNFLT, or eye health.</p>", unsafe_allow_html=True)
+    st.markdown("<div style='font-weight:900; font-size:18px; margin-bottom:6px;'>🤖 OCULAIRE Assistant</div>", unsafe_allow_html=True)
+    st.markdown("<div style='color:var(--muted); margin-bottom:10px;'>Ask about glaucoma, OCT, RNFLT or interpretation of analysis.</div>", unsafe_allow_html=True)
 
-    # display chat history (newest last)
+    # show history
     for msg in st.session_state.chat_history:
         if msg["role"] == "user":
-            st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='padding:10px; border-radius:8px; background:rgba(0,245,255,0.06); margin-bottom:8px;'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
         else:
-            st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='padding:10px; border-radius:8px; background:rgba(255,64,196,0.06); margin-bottom:8px;'><strong>OCULAIRE:</strong> {msg['content']}</div>", unsafe_allow_html=True)
 
     user_question = st.text_input("Your question:", key="chat_input", placeholder="e.g., What is glaucoma? How does OCT detect it?", label_visibility="collapsed")
     col1, col2 = st.columns([4,1])
     with col1:
-        send_btn = st.button("📤 Send", use_container_width=True)
+        send_btn = st.button("📤 Send")
     with col2:
-        clear_btn = st.button("🗑️", use_container_width=True)
+        clear_btn = st.button("🗑️ Clear chat")
 
     if send_btn:
-        q = (user_question or "").strip()
-        if not q:
-            st.warning("Please enter a question.")
+        if not user_question or user_question.strip() == "":
+            st.warning("Please type a question first.")
         else:
-            # Prevent duplicate processing across reruns quickly
-            if q != st.session_state.get("last_processed_q"):
-                st.session_state.last_processed_q = q
-                st.session_state.chat_history.append({"role": "user", "content": q})
-                # call assistant
+            if not API_KEY:
+                st.error("❌ Gemini API key not configured. Add GEMINI_API_KEY to secrets or environment.")
+            else:
                 with st.spinner("🔍 Searching for answers..."):
-                    reply = ask_glaucoma_assistant(q, st.session_state.chat_history, API_KEY)
-                st.session_state.chat_history.append({"role": "assistant", "content": reply})
-                # rerun to show updated history and clear text input
-                # To avoid immediate errors, use a tiny sleep and then rerun
-                time.sleep(0.05)
-                st.experimental_rerun()
+                    # append user query, call assistant, append reply
+                    st.session_state.chat_history.append({"role":"user","content":user_question})
+                    reply = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
+                    st.session_state.chat_history.append({"role":"assistant","content":reply})
+                    # re-render by rerunning (safe)
+                    st.experimental_rerun()
 
     if clear_btn:
         st.session_state.chat_history = []
+        # rerun so the expander re-renders
         st.experimental_rerun()
 
 st.markdown('</div>', unsafe_allow_html=True)
