@@ -1,4 +1,4 @@
-# app.py - OCULAIRE Neon Lab v5 (no logo, neon-green animated header)
+# app.py - OCULAIRE (updated header: neon-green glowing title, no logo)
 import streamlit as st
 import numpy as np
 import joblib
@@ -23,63 +23,65 @@ except Exception:
     USE_SDK = False
 
 # -----------------------
-# Page Config (single call)
+# Page Config (do this before writing markup)
 # -----------------------
 st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    layout="wide",
                    page_icon="👁️")
 
 # -----------------------
-# Header (NEON GREEN glowing animated title; no image/logo)
+# Header (neon-green glowing title, no logo)
 # -----------------------
 st.markdown("""
-<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;margin-top:22px;margin-bottom:18px; animation: fadeIn 0.9s ease-out;">
+<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;margin-top:22px;margin-bottom:18px;">
   <div style="text-align:center; width:100%; max-width:1100px;">
     <h1 style="
       font-size:64px;
       margin:0;
       letter-spacing:8px;
       font-weight:900;
-      color:transparent;
-      -webkit-background-clip:text;
-      background: linear-gradient(90deg, #7fff2f, #39ff14, #a6ff7a);
-      background-size:200% auto;
-      animation: neonPulse 3s ease-in-out infinite alternate, colorShift 6s linear infinite;
-      text-shadow: 0 0 30px rgba(57,255,20,0.18), 0 0 60px rgba(57,255,20,0.10);
+      color:#39ff14;
+      animation: pulseNeon 2.8s ease-in-out infinite;
+      text-shadow:
+        0 0 12px rgba(57,255,20,0.6),
+        0 0 24px rgba(57,255,20,0.4),
+        0 0 46px rgba(57,255,20,0.25),
+        0 0 80px rgba(57,255,20,0.15);
     ">OCULAIRE</h1>
-    <h2 style="margin:12px 0 0 0; color:#bfeec1; font-weight:600; font-size:18px;">Illuminating Vision. Detecting Glaucoma.</h2>
-    <h3 style="margin:8px 0 0 0; color:#9ee89f; font-weight:500; font-size:14px;">AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</h3>
+
+    <h2 style="margin:10px 0 0 0; color:#b6ffb0; font-weight:600; font-size:18px;">
+      Illuminating Vision. Detecting Glaucoma.
+    </h2>
+
+    <h3 style="margin:8px 0 0 0; color:#8aff95; font-weight:500; font-size:14px;">
+      AI-Powered Glaucoma Detection Dashboard — Neon Lab v5
+    </h3>
   </div>
 </div>
 
 <style>
-@keyframes neonPulse {
+@keyframes pulseNeon {
   0% {
-    text-shadow: 0 0 12px rgba(57,255,20,0.25), 0 0 30px rgba(57,255,20,0.12), 0 0 48px rgba(166,255,122,0.06);
+    text-shadow:
+      0 0 10px rgba(57,255,20,0.4),
+      0 0 22px rgba(57,255,20,0.25),
+      0 0 40px rgba(57,255,20,0.15);
     transform: scale(1);
   }
   50% {
-    text-shadow: 0 0 40px rgba(57,255,20,0.9), 0 0 80px rgba(57,255,20,0.6), 0 0 120px rgba(166,255,122,0.35);
+    text-shadow:
+      0 0 25px rgba(57,255,20,0.9),
+      0 0 55px rgba(57,255,20,0.7),
+      0 0 90px rgba(57,255,20,0.5);
     transform: scale(1.03);
   }
   100% {
-    text-shadow: 0 0 18px rgba(57,255,20,0.3), 0 0 40px rgba(57,255,20,0.18), 0 0 60px rgba(166,255,122,0.08);
+    text-shadow:
+      0 0 12px rgba(57,255,20,0.5),
+      0 0 28px rgba(57,255,20,0.25),
+      0 0 45px rgba(57,255,20,0.2);
     transform: scale(1);
   }
-}
-@keyframes colorShift {
-  0% { background-position:0% center; }
-  100% { background-position:200% center; }
-}
-@keyframes fadeIn {
-  from { opacity:0; transform: translateY(-16px); }
-  to { opacity:1; transform: translateY(0); }
-}
-
-/* small responsive tweak */
-@media (max-width:700px) {
-  h1 { font-size:44px !important; letter-spacing:4px !important; }
-  h2 { font-size:15px !important; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -114,10 +116,10 @@ plt.style.use('dark_background')
 plt.rcParams.update({
     "figure.facecolor": "#050612",
     "axes.facecolor": "#050612",
-    "axes.edgecolor": "#39ff14",   # neon green tweak for plots
+    "axes.edgecolor": "#00f5ff",
     "axes.labelcolor": "#e6faff",
-    "xtick.color": "#39ff14",
-    "ytick.color": "#a6ff7a",
+    "xtick.color": "#00f5ff",
+    "ytick.color": "#ff40c4",
     "text.color": "#e6faff",
     "font.size": 12,
     "axes.titleweight": "bold",
@@ -130,44 +132,51 @@ st.markdown("""
 <style>
 :root {
   --bg:#020208;
-  --panel:#07120a;
-  --neonA:#39ff14;  /* neon green */
-  --neonB:#7fff2f;  /* lighter green accent */
+  --panel:#0a0f25;
+  --neonA:#00f5ff;
+  --neonB:#ff40c4;
   --muted:#a4b1c9;
 }
 
-/* allow wider layout */
+/* override Streamlit sizing so our severity bar can span the page */
 .block-container {
   max-width: 98% !important;
   padding-left: 1rem !important;
   padding-right: 1rem !important;
 }
 
-/* general */
+/* general app */
 .stApp {
-  background: radial-gradient(circle at 20% 20%, #07121a, #020208 90%);
+  background: radial-gradient(circle at 20% 20%, #091133, #020208 90%);
   color: #e6faff;
   font-family: 'Plus Jakarta Sans', Inter, system-ui;
 }
 
-/* small card */
+/* card */
 .card {
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-  border:1px solid rgba(255,255,255,0.03);
-  box-shadow: 0 0 25px rgba(57,255,20,0.02);
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  border:1px solid rgba(255,255,255,0.05);
+  box-shadow: 0 0 25px rgba(0,245,255,0.05), 0 0 35px rgba(255,64,196,0.05);
   border-radius:12px; padding:16px;
 }
 .metric-label { color:var(--muted); font-size:12px; }
-.large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 12px rgba(57,255,20,0.08); }
+.large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.5); }
 
-/* severity bar */
-.sev-wrap { margin-top: 18px; width: 100%; display:flex; align-items:center; justify-content:center; flex-direction:column; }
+/* Severity bar */
+.sev-wrap {
+  margin-top: 18px;
+  width: 100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-direction:column;
+}
 .sev-outer {
   height: 26px;
   width: 100% !important;
-  background: rgba(255,255,255,0.02);
+  background: rgba(255,255,255,0.03);
   border-radius: 18px;
-  border: 1px solid rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.05);
   overflow: hidden;
   min-width: 280px;
   max-width: 1400px;
@@ -179,22 +188,73 @@ st.markdown("""
   border-radius: 18px;
   transition: width 0.9s cubic-bezier(.22,.9,.04,1);
   animation: sev-beat 0.9s infinite ease-in-out;
-  box-shadow: 0 0 28px rgba(57,255,20,0.55);
+  box-shadow: 0 0 35px rgba(0,245,255,0.7), 0 0 45px rgba(255,64,196,0.6);
   transform-origin: left center;
 }
-@keyframes sev-beat { 0% { transform: scaleX(1) } 50% { transform: scaleX(1.02) } 100% { transform: scaleX(1) } }
-.sev-chip { margin-top:10px; padding:8px 16px; font-size:15px; font-weight:900; border-radius:20px; background: linear-gradient(90deg, var(--neonA), var(--neonB)); color:#021617; box-shadow: 0 6px 30px rgba(57,255,20,0.18); }
+@keyframes sev-beat {
+  0% { transform: scaleX(1) }
+  50% { transform: scaleX(1.02) }
+  100% { transform: scaleX(1) }
+}
 
-/* chat message styles */
-.user-msg { background: linear-gradient(135deg, rgba(57,255,20,0.06), rgba(57,255,20,0.02)); border-left: 3px solid var(--neonA); padding:12px; border-radius:8px; margin:8px 0; }
-.assistant-msg { background: linear-gradient(135deg, rgba(166,255,122,0.05), rgba(166,255,122,0.02)); border-left: 3px solid var(--neonB); padding:12px; border-radius:8px; margin:8px 0; }
+.sev-chip {
+  margin-top: 10px;
+  padding: 8px 16px;
+  font-size: 15px;
+  font-weight: 900;
+  border-radius: 20px;
+  background: linear-gradient(90deg, var(--neonA), var(--neonB));
+  color: #021617;
+  box-shadow: 0 6px 30px rgba(0,245,255,0.25), 0 6px 30px rgba(255,64,196,0.18);
+  animation: chip-beat 0.9s infinite ease-in-out;
+}
+@keyframes chip-beat {
+  0% { transform: translateY(0) scale(1) }
+  50% { transform: translateY(-4px) scale(1.02) }
+  100% { transform: translateY(0) scale(1) }
+}
 
-/* floating expander */
-.floating-expander details { background: linear-gradient(180deg, rgba(8,12,8,0.98), rgba(2,2,8,0.98)) !important; border: 2px solid rgba(57,255,20,0.14) !important; border-radius:16px !important; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
-.floating-expander details summary { background: linear-gradient(135deg, rgba(57,255,20,0.06), rgba(166,255,122,0.04)) !important; padding:12px !important; border-radius:12px !important; font-weight:800 !important; font-size:16px !important; color:#e6faff !important; display:flex !important; align-items:center !important; gap:8px !important; }
-.floating-expander details summary::before { content: "💬"; font-size:22px; margin-right:8px; }
+/* chat & expander neon visuals */
+.user-msg {
+  background: linear-gradient(135deg, rgba(0,245,255,0.15), rgba(0,245,255,0.05));
+  border-left: 3px solid var(--neonA);
+  padding: 12px;
+  border-radius: 8px;
+  margin: 8px 0;
+}
+.assistant-msg {
+  background: linear-gradient(135deg, rgba(255,64,196,0.15), rgba(255,64,196,0.05));
+  border-left: 3px solid var(--neonB);
+  padding: 12px;
+  border-radius: 8px;
+  margin: 8px 0;
+}
 
-/* hide default footer */
+/* floating expander neon visuals */
+.floating-expander details {
+  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
+  border: 2px solid rgba(0,245,255,0.35) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+.floating-expander details summary {
+  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
+  padding: 12px !important;
+  border-radius: 12px !important;
+  font-weight: 800 !important;
+  font-size: 16px !important;
+  color: #e6faff !important;
+  display:flex !important;
+  align-items:center !important;
+  gap:8px !important;
+}
+.floating-expander details summary::before {
+  content: "💬";
+  font-size: 22px;
+  margin-right:8px;
+}
+
+/* hide footer */
 footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
@@ -349,8 +409,10 @@ def fig_to_png(fig):
     return buf.getvalue()
 
 def create_pdf(figs, metadata=None):
+    # Create a multipage PDF in-memory using matplotlib PdfPages.
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
+        # cover page with metadata
         fig = plt.figure(figsize=(8.5,11))
         fig.patch.set_facecolor('#050612')
         title = metadata.get('title','OCULAIRE Report') if metadata else 'OCULAIRE Report'
@@ -367,6 +429,7 @@ def create_pdf(figs, metadata=None):
         pdf.savefig(fig, bbox_inches='tight')
         plt.close(fig)
 
+        # add provided figures
         for f in figs:
             pdf.savefig(f, bbox_inches='tight', facecolor=f.get_facecolor())
             plt.close(f)
@@ -559,6 +622,7 @@ with colB:
         bscan_file = st.file_uploader("Upload B-Scan Image (jpg/png)", type=["jpg","png","jpeg"], key="bscan_img")
         bscan_npz_file = None
     else:
+        # NPZ mode for B-scan (sequence/volume)
         bscan_npz_file = st.file_uploader("Upload B-scan volume (.npz)", type=["npz"], key="bscan_npz")
         bscan_file = None
     st.markdown("</div>", unsafe_allow_html=True)
@@ -568,13 +632,14 @@ threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 # -----------------------
 # Analysis logic (unchanged except it uses rnflt_arr / bscan_file or bscan_npz_file)
 # -----------------------
-if (('rnflt_arr' in locals() and rnflt_arr is not None) or ( 'rnflt_file' in locals() and rnflt_file ) or ( 'bscan_file' in locals() and bscan_file is not None ) or ( 'bscan_npz_file' in locals() and bscan_npz_file is not None )):
+if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_file is not None) or (bscan_npz_file is not None)):
     figs = []
     severity_overall = 0
     st.markdown("<hr>", unsafe_allow_html=True)
 
     # RNFLT Processing
     if 'rnflt_arr' in locals() and rnflt_arr is not None:
+        # if we have metrics from earlier
         try:
             metrics = rnflt_metrics
             X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
@@ -600,11 +665,11 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or ( 'rnflt_file' in loc
             st.markdown(render_severity(sev), unsafe_allow_html=True)
 
             fig, axes = plt.subplots(1,3,figsize=(18,6),constrained_layout=True)
-            im0 = axes[0].imshow(rnflt_arr, cmap='turbo'); axes[0].axis('off'); axes[0].set_title("Uploaded RNFLT")
+            im0=axes[0].imshow(rnflt_arr,cmap='turbo');axes[0].axis('off');axes[0].set_title("Uploaded RNFLT")
             plt.colorbar(im0,ax=axes[0],shrink=0.85)
-            im1 = axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30); axes[1].axis('off'); axes[1].set_title("Difference (vs Healthy)")
+            im1=axes[1].imshow(diff,cmap='bwr',vmin=-30,vmax=30);axes[1].axis('off');axes[1].set_title("Difference (vs Healthy)")
             plt.colorbar(im1,ax=axes[1],shrink=0.85)
-            im2 = axes[2].imshow(risk, cmap='hot'); axes[2].axis('off'); axes[2].set_title("Risk Map")
+            im2=axes[2].imshow(risk,cmap='hot');axes[2].axis('off');axes[2].set_title("Risk Map")
             plt.colorbar(im2,ax=axes[2],shrink=0.85)
             fig.patch.set_facecolor("#050612")
             st.pyplot(fig)
@@ -612,8 +677,8 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or ( 'rnflt_file' in loc
         except Exception as e:
             st.error(f"Error in RNFLT section: {e}")
 
-    # RNFLT NPZ uploader fallback
-    if 'rnflt_file' in locals() and rnflt_file and (not ('rnflt_arr' in locals() and rnflt_arr is not None)):
+    # RNFLT NPZ uploader fallback (older code path)
+    if rnflt_file and ('rnflt_arr' not in locals() or rnflt_arr is None):
         if scaler is not None:
             rnflt, metrics = process_npz(rnflt_file)
             if rnflt is not None:
@@ -634,21 +699,23 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or ( 'rnflt_file' in loc
                 m4.markdown(f"<div class='metric-label'>Cluster</div><div class='large-metric'>{cluster}</div>", unsafe_allow_html=True)
                 st.markdown(render_severity(sev), unsafe_allow_html=True)
                 fig, axes = plt.subplots(1,3,figsize=(18,6),constrained_layout=True)
-                im0 = axes[0].imshow(rnflt, cmap='turbo'); axes[0].axis('off'); axes[0].set_title("Uploaded RNFLT")
+                im0=axes[0].imshow(rnflt,cmap='turbo');axes[0].axis('off');axes[0].set_title("Uploaded RNFLT")
                 plt.colorbar(im0,ax=axes[0],shrink=0.85)
-                im1 = axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30); axes[1].axis('off'); axes[1].set_title("Difference (vs Healthy)")
+                im1=axes[1].imshow(diff,cmap='bwr',vmin=-30,vmax=30);axes[1].axis('off');axes[1].set_title("Difference (vs Healthy)")
                 plt.colorbar(im1,ax=axes[1],shrink=0.85)
-                im2 = axes[2].imshow(risk, cmap='hot'); axes[2].axis('off'); axes[2].set_title("Risk Map")
+                im2=axes[2].imshow(risk,cmap='hot');axes[2].axis('off');axes[2].set_title("Risk Map")
                 plt.colorbar(im2,ax=axes[2],shrink=0.85)
                 fig.patch.set_facecolor("#050612")
                 st.pyplot(fig)
                 figs.append(fig)
 
-    # B-Scan Processing (NPZ)
+    # B-Scan Processing
+    # If user uploaded an NPZ for B-scan (sequence), take first slice as representative
     if 'bscan_npz_file' in locals() and bscan_npz_file is not None:
         try:
             bscan_vol, _ = process_npz(bscan_npz_file)
             if bscan_vol is not None:
+                # bscan_vol already flattened to 2D by process_npz if 3D
                 image_pil = Image.fromarray(np.uint8(255 * (bscan_vol - np.nanmin(bscan_vol)) / (np.nanmax(bscan_vol) - np.nanmin(bscan_vol) + 1e-9)))
                 batch, proc = preprocess_bscan(image_pil)
                 if b_model is not None:
@@ -668,8 +735,8 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or ( 'rnflt_file' in loc
         except Exception as e:
             st.error(f"B-scan NPZ read error: {e}")
 
-    # B-Scan Processing (single image)
-    if 'bscan_file' in locals() and bscan_file:
+    # B-scan as single image (recommended)
+    if bscan_file:
         try:
             image_pil = Image.open(bscan_file).convert("L")
             batch, proc = preprocess_bscan(image_pil)
@@ -724,6 +791,7 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or ( 'rnflt_file' in loc
         st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
         st.download_button("📄 Download Full Report (PDF)", data=pdf_bytes, file_name="oculaire_report.pdf", mime="application/pdf")
 
+        # Save run button (persist to SQLite)
         if st.button("💾 Save run to history & store PDF"):
             try:
                 metrics_to_store = rnflt_metrics or {}
@@ -734,7 +802,7 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or ( 'rnflt_file' in loc
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Saved runs
+    # If user saved runs, show list and allow download
     st.markdown("<hr>", unsafe_allow_html=True)
     st.subheader("Saved Runs (recent)")
     runs = list_runs(10)
@@ -752,27 +820,30 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or ( 'rnflt_file' in loc
                         st.download_button(f"Download run {rid}", data=pdfb, file_name=f"oculaire_run_{rid}.pdf", mime="application/pdf")
             with cols[2]:
                 if st.button(f"🗑️ Delete #{rid}", key=f"del_{rid}"):
+                    # quick delete (not implemented fully) — simple UX: inform user to clear DB manually for now
                     st.warning("Delete not implemented in this demo. To remove rows, delete oculaire_runs.db or run cleanup script.")
     else:
         st.info("No saved runs yet. Save a run after analysis using the 'Save run to history' button.")
 
 st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center;color:#a4b1c9;padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# Floating expander (Streamlit-only UI) — neon-friendly
+# Floating expander (Streamlit-only UI) — behaves like expander but neon
 # -----------------------
 st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
 with st.expander("💬 Ask AI assistant", expanded=False):
     st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:12px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
 
+    # display chat history
     for msg in st.session_state.chat_history:
         if msg["role"] == "user":
             st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
         else:
             st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
 
+    # input area
     user_question = st.text_input("Your question:", key="chat_input",
                                   placeholder="e.g., What is glaucoma? How does OCT detect it?",
                                   label_visibility="collapsed", help="Type your glaucoma or OCT question here")
@@ -788,9 +859,11 @@ with st.expander("💬 Ask AI assistant", expanded=False):
             st.error("❌ API key not configured. See sidebar.")
         else:
             with st.spinner("🔍 Searching for answers..."):
+                # append user query and call assistant
                 st.session_state.chat_history.append({"role": "user", "content": user_question})
                 reply = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply})
+            # rerun to show updated conversation
             try:
                 st.experimental_rerun()
             except Exception:
