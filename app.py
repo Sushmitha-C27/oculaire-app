@@ -11,6 +11,19 @@ import os
 import requests
 import json
 import time
+import sqlite3
+from datetime import datetime
+
+# For PDF report generation
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.lib import colors
+    REPORTLAB_AVAILABLE = True
+except Exception:
+    REPORTLAB_AVAILABLE = False
 
 # Try to import google.generativeai, fallback to requests
 try:
@@ -56,40 +69,29 @@ plt.style.use('dark_background')
 plt.rcParams.update({
     "figure.facecolor": "#050612",
     "axes.facecolor": "#050612",
-    "axes.edgecolor": "#00f5ff",
-    "axes.labelcolor": "#e6faff",
-    "xtick.color": "#00f5ff",
-    "ytick.color": "#ff40c4",
+    "axes.edgecolor": "#39ff14",  # neon green axes
+    "axes.labelcolor": "#bfffbf",
+    "xtick.color": "#39ff14",
+    "ytick.color": "#39ff14",
     "text.color": "#e6faff",
     "font.size": 12,
     "axes.titleweight": "bold",
 })
 
 # -----------------------
-# CSS — full-width patch + neon severity bar + other styles (greens)
+# CSS — full-width patch + neon severity bar + other styles (neon green theme)
 # -----------------------
 st.markdown("""
 <style>
 :root {
   --bg:#020208;
   --panel:#0a0f25;
-  /* changed to neon green palette */
-  --neonA:#39ff14;    /* vivid neon green */
-  --neonB:#85ff6e;    /* lighter mint green */
-  --muted:#9fcdae;
+  --neonA:#39ff14;  /* neon green */
+  --neonB:#a7ff7a;  /* lighter green */
+  --muted:#9fb8a0;
 }
 
-/* subtle animated glow for the title */
-@keyframes glowPulse {
-  0% { text-shadow: 0 0 12px rgba(57,255,20,0.45), 0 0 30px rgba(57,255,20,0.25); transform: scale(1); }
-  50% { text-shadow: 0 0 28px rgba(57,255,20,0.95), 0 0 60px rgba(133,255,110,0.6); transform: scale(1.03); }
-  100% { text-shadow: 0 0 12px rgba(57,255,20,0.45), 0 0 30px rgba(57,255,20,0.25); transform: scale(1); }
-}
-
-/* ------------------------------------------------------------------
-   CRITICAL: override Streamlit's block-container sizing so our
-   severity bar can span the page. This lets .sev-outer be full width.
-   ------------------------------------------------------------------ */
+/* allow full-width */
 .block-container {
   max-width: 98% !important;
   padding-left: 1rem !important;
@@ -102,42 +104,29 @@ st.markdown("""
   color: #e6faff;
   font-family: 'Plus Jakarta Sans', Inter, system-ui;
 }
-.header { text-align:center; margin-top:18px; margin-bottom:10px; }
+
+/* header */
+.header { text-align:center; margin-top:10px; margin-bottom:10px; }
 .header h1 {
-  font-size:72px;
-  font-weight:900;
-  letter-spacing:6px;
-  margin: 0;
-  /* neon green gradient clipped to text */
+  font-size:48px; font-weight:900; letter-spacing:6px;
   background: linear-gradient(90deg, var(--neonA), var(--neonB));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  text-fill-color: transparent;
-  animation: glowPulse 2.8s ease-in-out infinite;
-  /* extra soft outer glow */
-  text-shadow: 0 0 30px rgba(57,255,20,0.18), 0 0 60px rgba(133,255,110,0.12);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  text-shadow: 0 0 22px rgba(57,255,20,0.9), 0 0 40px rgba(167,255,122,0.45);
+  animation: pulseGlow 3s ease-in-out infinite;
 }
-.header h3 {
-  color:var(--muted);
-  font-weight:600;
-  font-size:18px;
-  margin-top:10px;
-}
+.header h3 { color:var(--muted); font-weight:400; font-size:15px; margin-top:-6px; }
 
 /* card */
 .card {
-  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-  border:1px solid rgba(255,255,255,0.03);
-  box-shadow: 0 0 22px rgba(57,255,20,0.02);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.005));
+  border:1px solid rgba(57,255,20,0.06);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
   border-radius:12px; padding:16px;
 }
 .metric-label { color:var(--muted); font-size:12px; }
-.large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 12px rgba(57,255,20,0.06); }
+.large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 10px rgba(57,255,20,0.2); }
 
-/* ===========================================
-   SEVERITY BAR (FULL WIDTH + NEON BEAT) - green variant
-   =========================================== */
+/* severity bar */
 .sev-wrap {
   margin-top: 18px;
   width: 100%;
@@ -151,7 +140,7 @@ st.markdown("""
   width: 100% !important;
   background: rgba(255,255,255,0.02);
   border-radius: 18px;
-  border: 1px solid rgba(255,255,255,0.03);
+  border: 1px solid rgba(57,255,20,0.06);
   overflow: hidden;
   min-width: 280px;
   max-width: 1400px;
@@ -163,7 +152,7 @@ st.markdown("""
   border-radius: 18px;
   transition: width 0.9s cubic-bezier(.22,.9,.04,1);
   animation: sev-beat 0.9s infinite ease-in-out;
-  box-shadow: 0 0 28px rgba(57,255,20,0.55);
+  box-shadow: 0 0 30px rgba(57,255,20,0.45);
   transform-origin: left center;
 }
 @keyframes sev-beat {
@@ -179,16 +168,10 @@ st.markdown("""
   border-radius: 20px;
   background: linear-gradient(90deg, var(--neonA), var(--neonB));
   color: #021617;
-  box-shadow: 0 6px 30px rgba(57,255,20,0.18);
-  animation: chip-beat 0.9s infinite ease-in-out;
-}
-@keyframes chip-beat {
-  0% { transform: translateY(0) scale(1) }
-  50% { transform: translateY(-4px) scale(1.02) }
-  100% { transform: translateY(0) scale(1) }
+  box-shadow: 0 6px 30px rgba(57,255,20,0.15);
 }
 
-/* chat & expander styles (kept neon-friendly) */
+/* chat & expander styles */
 .user-msg {
   background: linear-gradient(135deg, rgba(57,255,20,0.06), rgba(57,255,20,0.02));
   border-left: 3px solid var(--neonA);
@@ -197,7 +180,7 @@ st.markdown("""
   margin: 8px 0;
 }
 .assistant-msg {
-  background: linear-gradient(135deg, rgba(133,255,110,0.06), rgba(133,255,110,0.02));
+  background: linear-gradient(135deg, rgba(167,255,122,0.06), rgba(167,255,122,0.02));
   border-left: 3px solid var(--neonB);
   padding: 12px;
   border-radius: 8px;
@@ -206,13 +189,13 @@ st.markdown("""
 
 /* floating expander neon visuals */
 .floating-expander details {
-  background: linear-gradient(180deg, rgba(8,12,10,0.98), rgba(2,2,8,0.98)) !important;
-  border: 2px solid rgba(57,255,20,0.18) !important;
+  background: linear-gradient(180deg, rgba(5,8,7,0.98), rgba(2,4,3,0.98)) !important;
+  border: 2px solid rgba(57,255,20,0.16) !important;
   border-radius: 16px !important;
   box-shadow: 0 20px 60px rgba(0,0,0,0.6);
 }
 .floating-expander details summary {
-  background: linear-gradient(135deg, rgba(57,255,20,0.06), rgba(133,255,110,0.04)) !important;
+  background: linear-gradient(135deg, rgba(57,255,20,0.05), rgba(167,255,122,0.03)) !important;
   padding: 12px !important;
   border-radius: 12px !important;
   font-weight: 800 !important;
@@ -222,10 +205,11 @@ st.markdown("""
   align-items:center !important;
   gap:8px !important;
 }
-.floating-expander details summary::before {
-  content: "💬";
-  font-size: 22px;
-  margin-right:8px;
+
+@keyframes pulseGlow {
+  0% { transform: scale(1); filter: drop-shadow(0 0 8px rgba(57,255,20,0.2)); }
+  50% { transform: scale(1.02); filter: drop-shadow(0 0 26px rgba(57,255,20,0.45)); }
+  100% { transform: scale(1); filter: drop-shadow(0 0 8px rgba(57,255,20,0.2)); }
 }
 
 /* hide footer */
@@ -297,15 +281,15 @@ Important: Always remind users to consult healthcare professionals for medical d
         return f"❌ Error: {str(e)}"
 
 # -----------------------
-# Header markup (neon green title)
+# Header markup (neon green)
 # -----------------------
 st.markdown("""
 <div class="header">
   <h1>OCULAIRE</h1>
-  <h3>Illuminating Vision. Detecting Glaucoma.</h3>
+  <h3>Illuminating Vision. Detecting Glaucoma. — Neon Lab v5</h3>
 </div>
+<hr>
 """, unsafe_allow_html=True)
-st.markdown("---")
 
 # -----------------------
 # Load Models (cache)
@@ -339,7 +323,7 @@ def process_npz(f):
         if arr.ndim == 3:
             arr = arr[0, :, :]
         vals = arr.flatten().astype(float)
-        m = {"mean": np.nanmean(vals), "std": np.nanstd(vals), "min": np.nanmin(vals), "max": np.nanmax(vals)}
+        m = {"mean": float(np.nanmean(vals)), "std": float(np.nanstd(vals)), "min": float(np.nanmin(vals)), "max": float(np.nanmax(vals))}
         return arr, m
     except Exception as e:
         st.error(f"Error reading NPZ: {e}")
@@ -393,11 +377,117 @@ def fig_to_png(fig):
     buf.seek(0)
     return buf.getvalue()
 
-def create_pdf(figs):
+# -----------------------
+# Upgraded PDF generator (ReportLab)
+# -----------------------
+def create_pdf(figs, rnflt_metrics=None, rnflt_cluster=None, rnflt_severity=None,
+               bscan_label=None, bscan_conf=None, patient=None, patient_id=None):
+    """
+    Returns PDF bytes. Includes text summary (metrics, cluster, severity, recommendations)
+    and the provided matplotlib figures (converted to PNG in-memory).
+    Requires reportlab.
+    """
+    if not REPORTLAB_AVAILABLE:
+        # Fallback: create a basic multi-page matplotlib PDF if reportlab missing
+        buf = io.BytesIO()
+        with PdfPages(buf) as pdf:
+            # cover page
+            fig = plt.figure(figsize=(8.5,11))
+            fig.patch.set_facecolor('#050612')
+            txt = f"OCULAIRE Report\n\nPatient: {patient or '-'} (ID: {patient_id or '-'})\n\n"
+            if rnflt_metrics:
+                txt += f"RNFLT mean: {rnflt_metrics.get('mean', '-'):.2f}\nRNFLT severity: {float(rnflt_severity or 0):.2f}%\nCluster: {rnflt_cluster}\n\n"
+            if bscan_label:
+                txt += f"B-scan: {bscan_label} ({bscan_conf:.2f}%)\n\n"
+            txt += "For research use only."
+            fig.text(0.05, 0.95, txt, va='top', wrap=True, fontsize=12, color='white')
+            pdf.savefig(fig, bbox_inches='tight')
+            plt.close(fig)
+            for f in figs:
+                pdf.savefig(f, bbox_inches='tight', facecolor=f.get_facecolor())
+                plt.close(f)
+        buf.seek(0)
+        return buf.getvalue()
+
+    # ReportLab path (preferred)
     buf = io.BytesIO()
-    with PdfPages(buf) as pdf:
-        for f in figs:
-            pdf.savefig(f, bbox_inches='tight', facecolor=f.get_facecolor())
+    doc = SimpleDocTemplate(buf, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    styles = getSampleStyleSheet()
+    story = []
+
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Title'])
+    title_style.textColor = colors.HexColor("#39ff14")
+    title_style.fontSize = 20
+
+    story.append(Paragraph("OCULAIRE — Glaucoma Analysis Report", title_style))
+    story.append(Spacer(1, 8))
+
+    meta_style = styles["Normal"]
+    meta_style.textColor = colors.white
+    story.append(Paragraph(f"<b>Patient:</b> {patient or '-'}", meta_style))
+    story.append(Paragraph(f"<b>Patient ID:</b> {patient_id or '-'}", meta_style))
+    story.append(Paragraph(f"<b>Generated:</b> {datetime.utcnow().isoformat()} UTC", meta_style))
+    story.append(Spacer(1, 12))
+
+    # RNFLT Metrics
+    if rnflt_metrics:
+        story.append(Paragraph("<b>RNFLT Metrics</b>", styles["Heading2"]))
+        mm = rnflt_metrics
+        story.append(Paragraph(f"• Mean RNFLT: <b>{mm.get('mean',0):.2f}</b> µm", styles["BodyText"]))
+        story.append(Paragraph(f"• Std Dev: <b>{mm.get('std',0):.2f}</b> µm", styles["BodyText"]))
+        story.append(Paragraph(f"• Min: <b>{mm.get('min',0):.2f}</b> µm", styles["BodyText"]))
+        story.append(Paragraph(f"• Max: <b>{mm.get('max',0):.2f}</b> µm", styles["BodyText"]))
+        story.append(Paragraph(f"• Cluster: <b>{rnflt_cluster}</b>", styles["BodyText"]))
+        story.append(Paragraph(f"• RNFLT Severity: <b>{float(rnflt_severity or 0):.1f}%</b>", styles["BodyText"]))
+        story.append(Spacer(1, 8))
+
+        # Advice based on RNFLT cluster
+        if isinstance(rnflt_cluster, str) and "Glaucoma" in rnflt_cluster:
+            advice = ("RNFLT pattern suggests thinning consistent with glaucoma-like profiles. "
+                      "Recommend ophthalmology follow-up, intraocular pressure (IOP) check, "
+                      "visual field testing and close OCT monitoring.")
+        else:
+            advice = ("RNFLT pattern resembles healthy profiles. Continue routine eye exams "
+                      "and maintain cardiovascular and metabolic health to preserve retinal health.")
+        story.append(Paragraph("<b>RNFLT Interpretation & Recommendations</b>", styles["Heading3"]))
+        story.append(Paragraph(advice, styles["BodyText"]))
+        story.append(Spacer(1, 12))
+
+    # B-scan summary
+    if bscan_label:
+        story.append(Paragraph("<b>B-Scan CNN Analysis</b>", styles["Heading2"]))
+        story.append(Paragraph(f"• CNN Classification: <b>{bscan_label}</b>", styles["BodyText"]))
+        story.append(Paragraph(f"• Confidence: <b>{float(bscan_conf or 0):.2f}%</b>", styles["BodyText"]))
+        story.append(Spacer(1, 8))
+        if isinstance(bscan_label, str) and "Glaucoma" in bscan_label:
+            b_adv = ("B-scan predicts glaucoma-like structural features. Correlate with RNFLT and visual field; "
+                     "consult an ophthalmologist for comprehensive glaucoma workup.")
+        else:
+            b_adv = ("B-scan appears without concerning features. Continue routine surveillance and maintain eye-healthy habits.")
+        story.append(Paragraph(b_adv, styles["BodyText"]))
+        story.append(Spacer(1, 12))
+
+    # Visualizations
+    story.append(Paragraph("<b>Visualizations</b>", styles["Heading2"]))
+    story.append(Spacer(1, 8))
+
+    for f in figs:
+        try:
+            png = fig_to_png(f)
+            # Use a reasonable width (page width ~ 8.5in minus margins)
+            img = RLImage(io.BytesIO(png), width=6.8*inch, height=3.6*inch)
+            story.append(img)
+            story.append(Spacer(1, 12))
+        except Exception:
+            # ignore failures embedding one figure
+            pass
+
+    # Footer note
+    story.append(Spacer(1, 10))
+    footer = Paragraph("For research use only. This report provides informational guidance and is not clinical advice.", styles["Normal"])
+    story.append(footer)
+
+    doc.build(story)
     buf.seek(0)
     return buf.getvalue()
 
@@ -412,7 +502,6 @@ def render_severity(pct):
       <div class='sev-chip'>{pct:.1f}%</div>
     </div>
     <script>
-      // small delay to ensure layout ready, then set width
       setTimeout(function(){{
         var el = document.getElementById('sev_inner');
         if (el) el.style.width = '{pct:.1f}%';
@@ -422,7 +511,7 @@ def render_severity(pct):
     return html
 
 # -----------------------
-# Sidebar (API status + RNFLT/B-scan input mode & converters)
+# Sidebar (API status + RNFLT/B-scan input mode & converters + patient quick fields)
 # -----------------------
 with st.sidebar:
     st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
@@ -433,20 +522,9 @@ with st.sidebar:
         st.error("❌ No API Key found")
         st.warning("Chatbot will not work without an API key")
     st.markdown("---")
-    st.markdown("""
-    <div style='font-size:12px; color:var(--muted);'>
-    <strong>How to configure Gemini API key:</strong><br><br>
-    <strong>For Streamlit Cloud:</strong><br>
-    1. Go to your app settings<br>
-    2. Add to Secrets:<br>
-    <code>GEMINI_API_KEY = "your-key-here"</code><br><br>
-    <strong>For Local Development:</strong><br>
-    1. Create <code>.streamlit/secrets.toml</code><br>
-    2. Add: <code>GEMINI_API_KEY = "your-key-here"</code><br>
-    3. Or set environment variable:<br>
-    <code>export GEMINI_API_KEY="your-key-here"</code><br><br>
-    </div>
-    """, unsafe_allow_html=True)
+    st.subheader("Patient (optional)")
+    patient_name = st.text_input("Patient name", key="patient_name")
+    patient_id = st.text_input("Patient ID", key="patient_id")
 
     st.markdown("---")
     st.subheader("RNFLT Input & Tools")
@@ -541,16 +619,16 @@ with colB:
 threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
 # -----------------------
-# Analysis logic (unchanged except it uses rnflt_arr / bscan_file or bscan_npz_file)
+# Analysis logic
 # -----------------------
-if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_file is not None) or (bscan_npz_file is not None)):
+if (('rnflt_arr' in locals() and rnflt_arr is not None) or ('rnflt_file' in locals() and rnflt_file) or ( 'bscan_file' in locals() and bscan_file is not None) or ('bscan_npz_file' in locals() and bscan_npz_file is not None)):
     figs = []
     severity_overall = 0
     st.markdown("<hr>", unsafe_allow_html=True)
 
     # RNFLT Processing
+    label_r = None
     if 'rnflt_arr' in locals() and rnflt_arr is not None:
-        # if we have metrics from earlier
         try:
             metrics = rnflt_metrics
             X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
@@ -588,8 +666,8 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
         except Exception as e:
             st.error(f"Error in RNFLT section: {e}")
 
-    # RNFLT NPZ uploader fallback (older code path)
-    if rnflt_file and ('rnflt_arr' not in locals() or rnflt_arr is None):
+    # RNFLT NPZ uploader fallback
+    if 'rnflt_file' in locals() and rnflt_file and (not ('rnflt_arr' in locals() and rnflt_arr is not None)):
         if scaler is not None:
             rnflt, metrics = process_npz(rnflt_file)
             if rnflt is not None:
@@ -620,13 +698,13 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
                 st.pyplot(fig)
                 figs.append(fig)
 
-    # B-Scan Processing
-    # If user uploaded an NPZ for B-scan (sequence), take first slice as representative
+    # B-Scan Processing (NPZ volume)
+    label_b = None
+    conf = 0.0
     if 'bscan_npz_file' in locals() and bscan_npz_file is not None:
         try:
             bscan_vol, _ = process_npz(bscan_npz_file)
             if bscan_vol is not None:
-                # bscan_vol already flattened to 2D by process_npz if 3D
                 image_pil = Image.fromarray(np.uint8(255 * (bscan_vol - np.nanmin(bscan_vol)) / (np.nanmax(bscan_vol) - np.nanmin(bscan_vol) + 1e-9)))
                 batch, proc = preprocess_bscan(image_pil)
                 if b_model is not None:
@@ -647,7 +725,7 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
             st.error(f"B-scan NPZ read error: {e}")
 
     # B-scan as single image (recommended)
-    if bscan_file:
+    if 'bscan_file' in locals() and bscan_file:
         try:
             image_pil = Image.open(bscan_file).convert("L")
             batch, proc = preprocess_bscan(image_pil)
@@ -676,6 +754,12 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
                 overlay = (np.stack([proc]*3, axis=-1)*255).astype(np.uint8)
                 overlay = cv2.addWeighted(overlay, 0.6, hm_color, 0.4, 0)
                 st.image([image_pil, overlay], caption=["Original B-Scan", "Grad-CAM Overlay"], use_column_width=True)
+                # add overlay figure to figs
+                fig2 = plt.figure(figsize=(8,6))
+                plt.imshow(overlay)
+                plt.axis('off')
+                fig2.patch.set_facecolor("#050612")
+                figs.append(fig2)
             else:
                 st.image(image_pil, caption="Original B-Scan", use_column_width=True)
         except Exception as e:
@@ -686,10 +770,20 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
     st.markdown(f"<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
     st.markdown(render_severity(severity_overall), unsafe_allow_html=True)
 
-    # Downloads
+    # Downloads + PDF creation
     if figs:
         png_bytes = fig_to_png(figs[0])
-        pdf_bytes = create_pdf(figs)
+        # call upgraded create_pdf with metrics and labels
+        pdf_bytes = create_pdf(
+            figs,
+            rnflt_metrics=(rnflt_metrics if 'rnflt_metrics' in locals() else None),
+            rnflt_cluster=(label_r if 'label_r' in locals() else None),
+            rnflt_severity=severity_overall,
+            bscan_label=(label_b if 'label_b' in locals() else None),
+            bscan_conf=(conf if 'conf' in locals() else None),
+            patient=patient_name or None,
+            patient_id=patient_id or None
+        )
         st.markdown("<div class='download-btns'>", unsafe_allow_html=True)
         st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
         st.download_button("📄 Download Full Report (PDF)", data=pdf_bytes, file_name="oculaire_report.pdf", mime="application/pdf")
@@ -733,11 +827,9 @@ with st.expander("💬 Ask AI assistant", expanded=False):
                 st.session_state.chat_history.append({"role": "user", "content": user_question})
                 reply = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply})
-            # rerun to show updated conversation
             try:
                 st.experimental_rerun()
             except Exception:
-                # older/newer streamlit may use st.rerun() — attempt that fallback
                 try:
                     st.rerun()
                 except Exception:
