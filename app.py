@@ -24,6 +24,30 @@ except Exception:
 # -----------------------
 # Page Config
 # -----------------------
+st.markdown("""
+<div class="header" style="text-align:center; margin-top:20px; margin-bottom:20px; animation: fadeIn 1.2s ease-out;">
+  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/Human_eye_icon.svg/1024px-Human_eye_icon.svg.png" width="90" style="filter: drop-shadow(0 0 12px rgba(0,245,255,0.6)); margin-bottom:10px;" />
+  <h1 style="font-size:56px; font-weight:900; letter-spacing:4px; background: linear-gradient(90deg, #00f5ff, #ff40c4); -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-shadow: 0 0 35px rgba(0,245,255,0.9), 0 0 45px rgba(255,64,196,0.8); animation: glowPulse 2.5s infinite ease-in-out;">
+    OCULAIRE
+  </h1>
+  <h2 style="color:#a4b1c9; font-weight:500; margin-top:-10px; font-size:20px;">Illuminating Vision. Detecting Glaucoma.</h2>
+  <h3 style="color:#7fa6ff; font-weight:400; font-size:16px;">AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</h3>
+</div>
+<hr>
+<style>
+@keyframes glowPulse {
+  0% { text-shadow: 0 0 25px rgba(0,245,255,0.5), 0 0 35px rgba(255,64,196,0.4); transform: scale(1); }
+  50% { text-shadow: 0 0 45px rgba(0,245,255,1), 0 0 60px rgba(255,64,196,0.8); transform: scale(1.03); }
+  100% { text-shadow: 0 0 25px rgba(0,245,255,0.5), 0 0 35px rgba(255,64,196,0.4); transform: scale(1); }
+}
+@keyframes fadeIn {
+  from { opacity:0; transform: translateY(-20px); }
+  to { opacity:1; transform: translateY(0); }
+}
+</style>
+""", unsafe_allow_html=True)
+
+# -----------------------
 st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    layout="wide",
                    page_icon="👁️")
