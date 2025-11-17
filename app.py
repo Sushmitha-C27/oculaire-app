@@ -1,3 +1,4 @@
+# app.py - OCULAIRE Neon Lab v5 (Full updated)
 import streamlit as st
 import numpy as np
 import joblib
@@ -13,6 +14,7 @@ import json
 import time
 import sqlite3
 from datetime import datetime
+import base64
 
 # Try to import google.generativeai, fallback to requests
 try:
@@ -22,23 +24,67 @@ except Exception:
     USE_SDK = False
 
 # -----------------------
-# Page Config
+# Header with embedded base64 symbol + glowing title
 # -----------------------
-st.markdown("""
-<div class="header" style="text-align:center; margin-top:20px; margin-bottom:20px; animation: fadeIn 1.2s ease-out;">
-  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/Human_eye_icon.svg/1024px-Human_eye_icon.svg.png" width="90" style="filter: drop-shadow(0 0 12px rgba(0,245,255,0.6)); margin-bottom:10px;" />
-  <h1 style="font-size:56px; font-weight:900; letter-spacing:4px; background: linear-gradient(90deg, #00f5ff, #ff40c4); -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-shadow: 0 0 35px rgba(0,245,255,0.9), 0 0 45px rgba(255,64,196,0.8); animation: glowPulse 2.5s infinite ease-in-out;">
-    OCULAIRE
-  </h1>
-  <h2 style="color:#a4b1c9; font-weight:500; margin-top:-10px; font-size:20px;">Illuminating Vision. Detecting Glaucoma.</h2>
-  <h3 style="color:#7fa6ff; font-weight:400; font-size:16px;">AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</h3>
+def _get_embedded_image(paths):
+    """
+    Try a list of local paths and return a base64 data URI for the first readable image.
+    paths: list of possible file paths (strings)
+    Returns either 'data:image/png;base64,...' or a fallback public SVG URL.
+    """
+    for p in paths:
+        try:
+            with open(p, "rb") as f:
+                data = f.read()
+            return "data:image/png;base64," + base64.b64encode(data).decode("utf-8")
+        except Exception:
+            continue
+    # fallback: public tiny SVG icon (guaranteed to load)
+    return "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/Human_eye_icon.svg/1024px-Human_eye_icon.svg.png"
+
+# Paths to try (update if you save image elsewhere)
+embedded_img_uri = _get_embedded_image([
+    "assets/eye_symbol.png",                     # preferred repo path (put file here)
+    "./assets/eye_symbol.png",
+    "/mnt/data/00bb6145-9a4e-4529-97fc-c9d4808af8a3.png",  # preview path #1 (environment-specific)
+    "/mnt/data/78d6860e-b6a5-4f77-b437-8d9076c5e57b.png"   # preview path #2
+])
+
+st.markdown(f"""
+<div class="header" style="display:flex;flex-direction:column;align-items:center;justify-content:center;margin-top:18px;margin-bottom:22px;">
+  <!-- square placeholder with embedded symbol -->
+  <div style="width:120px;height:120px;border:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;margin-bottom:18px;border-radius:6px;background:rgba(255,255,255,0.01);box-shadow:0 8px 40px rgba(0,0,0,0.6);">
+    <img src="{embedded_img_uri}" alt="eye-symbol" style="width:78px;height:78px;object-fit:contain; display:block; filter: drop-shadow(0 10px 28px rgba(0,245,255,0.12));" />
+  </div>
+
+  <!-- glowing animated title -->
+  <div style="text-align:center; width:100%; max-width:1100px;">
+    <h1 style="
+      font-size:62px;
+      margin:6px 0 0 0;
+      letter-spacing:8px;
+      font-weight:900;
+      color:transparent;
+      -webkit-background-clip:text;
+      background: linear-gradient(90deg,#bde8ff,#e6c4ff,#bde8ff);
+      background-size:200% auto;
+      animation: titleGlow 4s ease-in-out infinite alternate, titleColorShift 8s linear infinite;
+      text-shadow: 0 0 38px rgba(120,150,255,0.28);
+    ">OCULAIRE</h1>
+    <h2 style="margin:10px 0 0 0; color:#a7b8d9; font-weight:600; font-size:18px;">Illuminating Vision. Detecting Glaucoma.</h2>
+    <h3 style="margin:8px 0 0 0; color:#7fb0ff; font-weight:500; opacity:0.95; font-size:14px;">AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</h3>
+  </div>
 </div>
-<hr>
+
 <style>
-@keyframes glowPulse {
-  0% { text-shadow: 0 0 25px rgba(0,245,255,0.5), 0 0 35px rgba(255,64,196,0.4); transform: scale(1); }
-  50% { text-shadow: 0 0 45px rgba(0,245,255,1), 0 0 60px rgba(255,64,196,0.8); transform: scale(1.03); }
-  100% { text-shadow: 0 0 25px rgba(0,245,255,0.5), 0 0 35px rgba(255,64,196,0.4); transform: scale(1); }
+@keyframes titleGlow {
+  0% { text-shadow: 0 0 25px rgba(0,245,255,0.45), 0 0 40px rgba(255,64,196,0.45), 0 0 60px rgba(0,180,255,0.4); transform:scale(1); }
+  50% { text-shadow: 0 0 55px rgba(0,245,255,0.9), 0 0 85px rgba(255,64,196,0.8), 0 0 110px rgba(0,180,255,0.8); transform:scale(1.04); }
+  100% { text-shadow: 0 0 30px rgba(0,245,255,0.5), 0 0 50px rgba(255,64,196,0.5), 0 0 70px rgba(0,180,255,0.45); transform:scale(1); }
+}
+@keyframes titleColorShift {
+  0% { background-position:0% center; }
+  100% { background-position:200% center; }
 }
 @keyframes fadeIn {
   from { opacity:0; transform: translateY(-20px); }
