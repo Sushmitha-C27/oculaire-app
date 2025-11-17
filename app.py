@@ -1,4 +1,3 @@
-# app.py - OCULAIRE Neon Lab (updated header placement + neon green title)
 import streamlit as st
 import numpy as np
 import joblib
@@ -12,8 +11,6 @@ import os
 import requests
 import json
 import time
-import sqlite3
-from datetime import datetime
 
 # Try to import google.generativeai, fallback to requests
 try:
@@ -23,68 +20,11 @@ except Exception:
     USE_SDK = False
 
 # -----------------------
-# Page Config (MUST be first Streamlit UI call)
+# Page Config
 # -----------------------
 st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    layout="wide",
                    page_icon="👁️")
-
-# -----------------------
-# Neon green animated header (placed after set_page_config)
-# -----------------------
-st.markdown("""
-<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;margin-top:22px;margin-bottom:18px;">
-  <div style="text-align:center; width:100%; max-width:1100px;">
-    <h1 style="
-      font-size:64px;
-      margin:0;
-      letter-spacing:8px;
-      font-weight:900;
-      color:#39ff14;
-      animation: pulseNeon 2.8s ease-in-out infinite;
-      text-shadow:
-        0 0 12px rgba(57,255,20,0.6),
-        0 0 24px rgba(57,255,20,0.4),
-        0 0 46px rgba(57,255,20,0.25),
-        0 0 80px rgba(57,255,20,0.15);
-    ">OCULAIRE</h1>
-
-    <h2 style="margin:10px 0 0 0; color:#b6ffb0; font-weight:600; font-size:18px;">
-      Illuminating Vision. Detecting Glaucoma.
-    </h2>
-
-    <h3 style="margin:8px 0 0 0; color:#8aff95; font-weight:500; font-size:14px;">
-      AI-Powered Glaucoma Detection Dashboard — Neon Lab v5
-    </h3>
-  </div>
-</div>
-
-<style>
-@keyframes pulseNeon {
-  0% {
-    text-shadow:
-      0 0 10px rgba(57,255,20,0.4),
-      0 0 22px rgba(57,255,20,0.25),
-      0 0 40px rgba(57,255,20,0.15);
-    transform: scale(1);
-  }
-  50% {
-    text-shadow:
-      0 0 25px rgba(57,255,20,0.9),
-      0 0 55px rgba(57,255,20,0.7),
-      0 0 90px rgba(57,255,20,0.5);
-    transform: scale(1.03);
-  }
-  100% {
-    text-shadow:
-      0 0 12px rgba(57,255,20,0.5),
-      0 0 28px rgba(57,255,20,0.25),
-      0 0 45px rgba(57,255,20,0.2);
-    transform: scale(1);
-  }
-}
-</style>
-""", unsafe_allow_html=True)
 
 # -----------------------
 # Session State
@@ -126,19 +66,30 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — full-width patch + neon severity bar + other styles
+# CSS — full-width patch + neon severity bar + other styles (greens)
 # -----------------------
 st.markdown("""
 <style>
 :root {
   --bg:#020208;
   --panel:#0a0f25;
-  --neonA:#00f5ff;
-  --neonB:#ff40c4;
-  --muted:#a4b1c9;
+  /* changed to neon green palette */
+  --neonA:#39ff14;    /* vivid neon green */
+  --neonB:#85ff6e;    /* lighter mint green */
+  --muted:#9fcdae;
 }
 
-/* allow wider layout for neon bars */
+/* subtle animated glow for the title */
+@keyframes glowPulse {
+  0% { text-shadow: 0 0 12px rgba(57,255,20,0.45), 0 0 30px rgba(57,255,20,0.25); transform: scale(1); }
+  50% { text-shadow: 0 0 28px rgba(57,255,20,0.95), 0 0 60px rgba(133,255,110,0.6); transform: scale(1.03); }
+  100% { text-shadow: 0 0 12px rgba(57,255,20,0.45), 0 0 30px rgba(57,255,20,0.25); transform: scale(1); }
+}
+
+/* ------------------------------------------------------------------
+   CRITICAL: override Streamlit's block-container sizing so our
+   severity bar can span the page. This lets .sev-outer be full width.
+   ------------------------------------------------------------------ */
 .block-container {
   max-width: 98% !important;
   padding-left: 1rem !important;
@@ -147,23 +98,45 @@ st.markdown("""
 
 /* general app */
 .stApp {
-  background: radial-gradient(circle at 20% 20%, #091133, #020208 90%);
+  background: radial-gradient(circle at 20% 20%, #07130a, #020208 90%);
   color: #e6faff;
   font-family: 'Plus Jakarta Sans', Inter, system-ui;
+}
+.header { text-align:center; margin-top:18px; margin-bottom:10px; }
+.header h1 {
+  font-size:72px;
+  font-weight:900;
+  letter-spacing:6px;
+  margin: 0;
+  /* neon green gradient clipped to text */
+  background: linear-gradient(90deg, var(--neonA), var(--neonB));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-fill-color: transparent;
+  animation: glowPulse 2.8s ease-in-out infinite;
+  /* extra soft outer glow */
+  text-shadow: 0 0 30px rgba(57,255,20,0.18), 0 0 60px rgba(133,255,110,0.12);
+}
+.header h3 {
+  color:var(--muted);
+  font-weight:600;
+  font-size:18px;
+  margin-top:10px;
 }
 
 /* card */
 .card {
-  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
-  border:1px solid rgba(255,255,255,0.05);
-  box-shadow: 0 0 25px rgba(0,245,255,0.05), 0 0 35px rgba(255,64,196,0.05);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  border:1px solid rgba(255,255,255,0.03);
+  box-shadow: 0 0 22px rgba(57,255,20,0.02);
   border-radius:12px; padding:16px;
 }
 .metric-label { color:var(--muted); font-size:12px; }
-.large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.5); }
+.large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 12px rgba(57,255,20,0.06); }
 
 /* ===========================================
-   SEVERITY BAR (FULL WIDTH + NEON BEAT)
+   SEVERITY BAR (FULL WIDTH + NEON BEAT) - green variant
    =========================================== */
 .sev-wrap {
   margin-top: 18px;
@@ -176,9 +149,9 @@ st.markdown("""
 .sev-outer {
   height: 26px;
   width: 100% !important;
-  background: rgba(255,255,255,0.03);
+  background: rgba(255,255,255,0.02);
   border-radius: 18px;
-  border: 1px solid rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.03);
   overflow: hidden;
   min-width: 280px;
   max-width: 1400px;
@@ -190,7 +163,7 @@ st.markdown("""
   border-radius: 18px;
   transition: width 0.9s cubic-bezier(.22,.9,.04,1);
   animation: sev-beat 0.9s infinite ease-in-out;
-  box-shadow: 0 0 35px rgba(0,245,255,0.7), 0 0 45px rgba(255,64,196,0.6);
+  box-shadow: 0 0 28px rgba(57,255,20,0.55);
   transform-origin: left center;
 }
 @keyframes sev-beat {
@@ -198,8 +171,6 @@ st.markdown("""
   50% { transform: scaleX(1.02) }
   100% { transform: scaleX(1) }
 }
-
-/* Chip (percentage) */
 .sev-chip {
   margin-top: 10px;
   padding: 8px 16px;
@@ -208,7 +179,7 @@ st.markdown("""
   border-radius: 20px;
   background: linear-gradient(90deg, var(--neonA), var(--neonB));
   color: #021617;
-  box-shadow: 0 6px 30px rgba(0,245,255,0.25), 0 6px 30px rgba(255,64,196,0.18);
+  box-shadow: 0 6px 30px rgba(57,255,20,0.18);
   animation: chip-beat 0.9s infinite ease-in-out;
 }
 @keyframes chip-beat {
@@ -217,16 +188,16 @@ st.markdown("""
   100% { transform: translateY(0) scale(1) }
 }
 
-/* chat & expander styles */
+/* chat & expander styles (kept neon-friendly) */
 .user-msg {
-  background: linear-gradient(135deg, rgba(0,245,255,0.15), rgba(0,245,255,0.05));
+  background: linear-gradient(135deg, rgba(57,255,20,0.06), rgba(57,255,20,0.02));
   border-left: 3px solid var(--neonA);
   padding: 12px;
   border-radius: 8px;
   margin: 8px 0;
 }
 .assistant-msg {
-  background: linear-gradient(135deg, rgba(255,64,196,0.15), rgba(255,64,196,0.05));
+  background: linear-gradient(135deg, rgba(133,255,110,0.06), rgba(133,255,110,0.02));
   border-left: 3px solid var(--neonB);
   padding: 12px;
   border-radius: 8px;
@@ -235,13 +206,13 @@ st.markdown("""
 
 /* floating expander neon visuals */
 .floating-expander details {
-  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
-  border: 2px solid rgba(0,245,255,0.35) !important;
+  background: linear-gradient(180deg, rgba(8,12,10,0.98), rgba(2,2,8,0.98)) !important;
+  border: 2px solid rgba(57,255,20,0.18) !important;
   border-radius: 16px !important;
   box-shadow: 0 20px 60px rgba(0,0,0,0.6);
 }
 .floating-expander details summary {
-  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
+  background: linear-gradient(135deg, rgba(57,255,20,0.06), rgba(133,255,110,0.04)) !important;
   padding: 12px !important;
   border-radius: 12px !important;
   font-weight: 800 !important;
@@ -324,6 +295,17 @@ Important: Always remind users to consult healthcare professionals for medical d
                 return f"❌ Error ({response.status_code}): {response.text[:200]}"
     except Exception as e:
         return f"❌ Error: {str(e)}"
+
+# -----------------------
+# Header markup (neon green title)
+# -----------------------
+st.markdown("""
+<div class="header">
+  <h1>OCULAIRE</h1>
+  <h3>Illuminating Vision. Detecting Glaucoma.</h3>
+</div>
+""", unsafe_allow_html=True)
+st.markdown("---")
 
 # -----------------------
 # Load Models (cache)
@@ -411,82 +393,13 @@ def fig_to_png(fig):
     buf.seek(0)
     return buf.getvalue()
 
-def create_pdf(figs, metadata=None):
-    # Create a multipage PDF in-memory using matplotlib PdfPages.
+def create_pdf(figs):
     buf = io.BytesIO()
     with PdfPages(buf) as pdf:
-        # cover page with metadata
-        fig = plt.figure(figsize=(8.5,11))
-        fig.patch.set_facecolor('#050612')
-        title = metadata.get('title','OCULAIRE Report') if metadata else 'OCULAIRE Report'
-        subtitle = metadata.get('subtitle','Glaucoma analysis') if metadata else 'Glaucoma analysis'
-        patient = metadata.get('patient','-') if metadata else '-'
-        pid = metadata.get('patient_id','-') if metadata else '-'
-        ts = metadata.get('timestamp', datetime.utcnow().isoformat()) if metadata else datetime.utcnow().isoformat()
-        txt = f"{title}\n\n{subtitle}\n\nPatient: {patient} (ID: {pid})\nTimestamp: {ts}\n\nMetrics:\n"
-        metrics = metadata.get('metrics',{}) if metadata else {}
-        for k,v in metrics.items():
-            txt += f"{k}: {v}\n"
-        txt += f"\nOverall severity: {metadata.get('severity',0):.2f}%\n\nFor research use only. This is not clinical advice."
-        fig.text(0.05, 0.95, txt, va='top', wrap=True, fontsize=10, color='white')
-        pdf.savefig(fig, bbox_inches='tight')
-        plt.close(fig)
-
-        # add provided figures
         for f in figs:
             pdf.savefig(f, bbox_inches='tight', facecolor=f.get_facecolor())
-            plt.close(f)
     buf.seek(0)
     return buf.getvalue()
-
-# -----------------------
-# Database (SQLite) helpers for persistent history
-# -----------------------
-DB_PATH = os.path.join('.', 'oculaire_runs.db')
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS runs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            patient TEXT,
-            patient_id TEXT,
-            timestamp TEXT,
-            metrics TEXT,
-            severity REAL,
-            pdf BLOB
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-def save_run(patient, patient_id, metrics, severity, pdf_bytes):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('INSERT INTO runs (patient, patient_id, timestamp, metrics, severity, pdf) VALUES (?,?,?,?,?,?)',
-              (patient, patient_id, datetime.utcnow().isoformat(), json.dumps(metrics), float(severity), sqlite3.Binary(pdf_bytes)))
-    conn.commit()
-    conn.close()
-
-def list_runs(limit=20):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT id, patient, patient_id, timestamp, metrics, severity FROM runs ORDER BY id DESC LIMIT ?', (limit,))
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
-def load_run_pdf(run_id):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT pdf FROM runs WHERE id=?', (run_id,))
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else None
-
-# init DB on start
-init_db()
 
 # -----------------------
 # Severity renderer (HTML + JS sets width)
@@ -509,7 +422,7 @@ def render_severity(pct):
     return html
 
 # -----------------------
-# Sidebar (API status + RNFLT/B-scan input mode & converters + patient quick fields)
+# Sidebar (API status + RNFLT/B-scan input mode & converters)
 # -----------------------
 with st.sidebar:
     st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
@@ -534,11 +447,6 @@ with st.sidebar:
     <code>export GEMINI_API_KEY="your-key-here"</code><br><br>
     </div>
     """, unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.subheader("Patient (optional)")
-    patient_name = st.text_input("Patient name", key="patient_name")
-    patient_id = st.text_input("Patient ID", key="patient_id")
 
     st.markdown("---")
     st.subheader("RNFLT Input & Tools")
@@ -633,7 +541,7 @@ with colB:
 threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
 # -----------------------
-# Analysis logic
+# Analysis logic (unchanged except it uses rnflt_arr / bscan_file or bscan_npz_file)
 # -----------------------
 if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_file is not None) or (bscan_npz_file is not None)):
     figs = []
@@ -642,6 +550,7 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
 
     # RNFLT Processing
     if 'rnflt_arr' in locals() and rnflt_arr is not None:
+        # if we have metrics from earlier
         try:
             metrics = rnflt_metrics
             X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
@@ -679,7 +588,7 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
         except Exception as e:
             st.error(f"Error in RNFLT section: {e}")
 
-    # RNFLT NPZ uploader fallback
+    # RNFLT NPZ uploader fallback (older code path)
     if rnflt_file and ('rnflt_arr' not in locals() or rnflt_arr is None):
         if scaler is not None:
             rnflt, metrics = process_npz(rnflt_file)
@@ -711,11 +620,13 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
                 st.pyplot(fig)
                 figs.append(fig)
 
-    # B-Scan Processing - NPZ
+    # B-Scan Processing
+    # If user uploaded an NPZ for B-scan (sequence), take first slice as representative
     if 'bscan_npz_file' in locals() and bscan_npz_file is not None:
         try:
             bscan_vol, _ = process_npz(bscan_npz_file)
             if bscan_vol is not None:
+                # bscan_vol already flattened to 2D by process_npz if 3D
                 image_pil = Image.fromarray(np.uint8(255 * (bscan_vol - np.nanmin(bscan_vol)) / (np.nanmax(bscan_vol) - np.nanmin(bscan_vol) + 1e-9)))
                 batch, proc = preprocess_bscan(image_pil)
                 if b_model is not None:
@@ -775,54 +686,14 @@ if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_
     st.markdown(f"<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
     st.markdown(render_severity(severity_overall), unsafe_allow_html=True)
 
-    # Downloads + Persistent Save
+    # Downloads
     if figs:
         png_bytes = fig_to_png(figs[0])
-        pdf_bytes = create_pdf(figs, metadata={
-            'title': 'OCULAIRE Report',
-            'subtitle': 'Glaucoma analysis',
-            'patient': patient_name or '-',
-            'patient_id': patient_id or '-',
-            'timestamp': datetime.utcnow().isoformat(),
-            'metrics': rnflt_metrics or {},
-            'severity': float(severity_overall)
-        })
+        pdf_bytes = create_pdf(figs)
         st.markdown("<div class='download-btns'>", unsafe_allow_html=True)
         st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
         st.download_button("📄 Download Full Report (PDF)", data=pdf_bytes, file_name="oculaire_report.pdf", mime="application/pdf")
-
-        # Save run button (persist to SQLite)
-        if st.button("💾 Save run to history & store PDF"):
-            try:
-                metrics_to_store = rnflt_metrics or {}
-                save_run(patient_name or '-', patient_id or '-', metrics_to_store, severity_overall, pdf_bytes)
-                st.success("Saved run to local history (SQLite). You can view it in 'Saved Runs' below.")
-            except Exception as e:
-                st.error(f"Error saving run: {e}")
-
         st.markdown("</div>", unsafe_allow_html=True)
-
-    # If user saved runs, show list and allow download
-    st.markdown("<hr>", unsafe_allow_html=True)
-    st.subheader("Saved Runs (recent)")
-    runs = list_runs(10)
-    if runs:
-        for r in runs:
-            rid, rpatient, rpid, rts, rmetrics, rsev = r
-            cols = st.columns([3,1,1])
-            with cols[0]:
-                st.markdown(f"**{rpatient}** (ID: {rpid}) — {rts}")
-                st.markdown(f"Severity: {rsev:.2f}% — Metrics: {rmetrics}")
-            with cols[1]:
-                if st.button(f"⬇️ Download PDF #{rid}", key=f"dl_{rid}"):
-                    pdfb = load_run_pdf(rid)
-                    if pdfb:
-                        st.download_button(f"Download run {rid}", data=pdfb, file_name=f"oculaire_run_{rid}.pdf", mime="application/pdf")
-            with cols[2]:
-                if st.button(f"🗑️ Delete #{rid}", key=f"del_{rid}"):
-                    st.warning("Delete not implemented in this demo. To remove rows, delete oculaire_runs.db or run cleanup script.")
-    else:
-        st.info("No saved runs yet. Save a run after analysis using the 'Save run to history' button.")
 
 st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
@@ -866,6 +737,7 @@ with st.expander("💬 Ask AI assistant", expanded=False):
             try:
                 st.experimental_rerun()
             except Exception:
+                # older/newer streamlit may use st.rerun() — attempt that fallback
                 try:
                     st.rerun()
                 except Exception:
