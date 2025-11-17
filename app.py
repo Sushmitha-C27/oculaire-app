@@ -214,7 +214,7 @@ def ask_glaucoma_assistant(question, history, api_key):
             st.sidebar.error(f"SDK call failed: {e}")
 
     # REST fallback
-    url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
+    url = "https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.6, "maxOutputTokens": 400}
