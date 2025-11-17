@@ -1,9 +1,6 @@
 # ============================================================
 #  OCULAIRE — Neon Green UI + Fast Glow Header
-#  Option C Theme:
-#    • App UI       = Neon Green
-#    • PDF Cover    = Cyan + Magenta
-#    • Clinical PDF = Green-accent medical layout
+#  Option C Theme (cleaned + fixed global/state + blue clinical text)
 # ============================================================
 
 import streamlit as st
@@ -21,7 +18,7 @@ import json
 import time
 from datetime import datetime
 
-# ReportLab for advanced multipage PDF
+# ReportLab for multi-page PDF (ensure installed in environment)
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, PageBreak,
@@ -38,28 +35,29 @@ try:
 except Exception:
     USE_SDK = False
 
-# ------------------------------------------------------------
-# Page Config
-# ------------------------------------------------------------
-st.set_page_config(
-    page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
-    layout="wide",
-    page_icon="👁️"
-)
-
-# ------------------------------------------------------------
-# --- IMPORTANT: Initialize globals early to avoid NameError ---
-# ------------------------------------------------------------
-figs = []                   # will collect matplotlib figures used for PDF
+# -----------------------
+# Top-level initial state (prevents NameError/global issues)
+# These exist on module import so Streamlit's re-run won't hit NameError.
+# -----------------------
+figs = []                 # collected matplotlib figures for PDF
 rnflt_metrics = None
 label_r = None
 label_b = None
 conf = 0.0
 severity_overall = 0.0
 
-# ------------------------------------------------------------
-# Neon Green Theme + Fast Glow Header
-# ------------------------------------------------------------
+# -----------------------
+# Page Config
+# -----------------------
+st.set_page_config(
+    page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
+    layout="wide",
+    page_icon="👁️"
+)
+
+# -----------------------
+# Neon Green Theme + Fast Glow Header (UI)
+# -----------------------
 st.markdown("""
 <style>
 
@@ -149,17 +147,18 @@ label, h2, h3, h4, h5 {
 
 """, unsafe_allow_html=True)
 
-# ------------------------------------------------------------
+# -----------------------
 # Session State
-# ------------------------------------------------------------
+# -----------------------
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
-if 'last_processed_q' not in st.session_state:
-    st.session_state.last_processed_q = None
+# PDF trigger stored in session_state to survive reruns
+if 'trigger_pdf' not in st.session_state:
+    st.session_state['trigger_pdf'] = False
 
-# ------------------------------------------------------------
+# -----------------------
 # API Key helper
-# ------------------------------------------------------------
+# -----------------------
 def get_api_key():
     try:
         return st.secrets["GEMINI_API_KEY"]
@@ -171,9 +170,9 @@ def get_api_key():
 
 API_KEY = get_api_key()
 
-# ------------------------------------------------------------
+# -----------------------
 # Matplotlib Theme
-# ------------------------------------------------------------
+# -----------------------
 plt.style.use('dark_background')
 plt.rcParams.update({
     "figure.facecolor": "#020802",
@@ -187,13 +186,9 @@ plt.rcParams.update({
 })
 
 # ============================================================
-#  OCULAIRE — Processing & Analysis Engine
-#  (RNFLT, B-Scan, Risk Maps, Grad-CAM, Converters)
+#  Processing & helpers
 # ============================================================
 
-# ------------------------------------------------------------
-# Load Models
-# ------------------------------------------------------------
 @st.cache_resource
 def load_models():
     try:
@@ -212,26 +207,17 @@ def load_models():
 
     return b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster
 
-
 b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models()
 
-
-# ------------------------------------------------------------
-# Process NPZ files
-# ------------------------------------------------------------
 def process_npz(f):
     try:
         buf = io.BytesIO(f.getvalue())
         data = np.load(buf, allow_pickle=True)
         arr = data["volume"] if "volume" in data else data[data.files[0]]
-
-        # If 3D, take slice 0
         if arr.ndim == 3:
             arr = arr[0, :, :]
-
         arr = arr.astype(float)
         vals = arr.flatten()
-
         metrics = {
             "mean": float(np.nanmean(vals)),
             "std": float(np.nanstd(vals)),
@@ -243,42 +229,25 @@ def process_npz(f):
         st.error(f"Error reading NPZ: {e}")
         return None, None
 
-
-# ------------------------------------------------------------
-# RNFLT Risk Calculation
-# ------------------------------------------------------------
 def compute_risk_map(rnflt, healthy, threshold=-10):
     if rnflt.shape != healthy.shape:
         healthy = cv2.resize(healthy, (rnflt.shape[1], rnflt.shape[0]))
-
     diff = rnflt - healthy
     risk = np.where(diff < threshold, diff, np.nan)
-
     total = np.isfinite(diff).sum()
     risky = np.isfinite(risk).sum()
-
     severity = (risky / total) * 100 if total else 0
     return diff, risk, severity
 
-
-# ------------------------------------------------------------
-# B-scan preprocessing
-# ------------------------------------------------------------
-def preprocess_bscan(image_pil, size=(224, 224)):
+def preprocess_bscan(image_pil, size=(224,224)):
     arr = np.array(image_pil.convert('L'))
     arr = np.clip(arr, 0, np.percentile(arr, 99))
     arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-6)
-
     arr_res = cv2.resize(arr, size, interpolation=cv2.INTER_NEAREST)
-    rgb = np.repeat(arr_res[..., None], 3, axis=-1)
-    batch = np.expand_dims(rgb, axis=0).astype(np.float32)
-
+    arr_rgb = np.repeat(arr_res[..., None], 3, axis=-1)
+    batch = np.expand_dims(arr_rgb, axis=0).astype(np.float32)
     return batch, arr_res
 
-
-# ------------------------------------------------------------
-# Grad-CAM
-# ------------------------------------------------------------
 def gradcam(batch, model):
     try:
         last_conv = None
@@ -286,44 +255,47 @@ def gradcam(batch, model):
             if isinstance(layer, (tf.keras.layers.Conv2D, tf.keras.layers.DepthwiseConv2D)):
                 last_conv = layer.name
                 break
-
         if not last_conv:
             return None
-
-        grad_model = tf.keras.models.Model(model.inputs,
-                                           [model.get_layer(last_conv).output, model.output])
-
+        grad_model = tf.keras.models.Model(model.inputs, [model.get_layer(last_conv).output, model.output])
         with tf.GradientTape() as tape:
             conv_out, preds = grad_model(batch)
             loss = preds[:, 0]
-
         grads = tape.gradient(loss, conv_out)
-        pooled = tf.reduce_mean(grads, axis=(0, 1, 2))
-
+        pooled = tf.reduce_mean(grads, axis=(0,1,2))
         conv_out = conv_out[0]
         heat = conv_out @ pooled[..., tf.newaxis]
         heat = tf.squeeze(heat)
-
         heat = tf.maximum(heat, 0) / (tf.reduce_max(heat) + 1e-6)
         return heat.numpy()
-
     except Exception:
         return None
 
-
-# ------------------------------------------------------------
-# PNG + PDF helpers
-# ------------------------------------------------------------
 def fig_to_png(fig):
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight", facecolor=fig.get_facecolor(), dpi=150)
     buf.seek(0)
     return buf.getvalue()
 
+def convert_images_to_npz(files):
+    try:
+        stacks = []
+        for f in files:
+            im = Image.open(f).convert("L")
+            arr = np.array(im).astype(np.float32)
+            stacks.append(arr)
+        volume = np.stack(stacks, axis=0)
+        buf = io.BytesIO()
+        np.savez_compressed(buf, volume=volume)
+        buf.seek(0)
+        return buf.getvalue(), volume.shape
+    except Exception as e:
+        st.error(f"Conversion error: {e}")
+        return None, None
 
-# ------------------------------------------------------------
-# Severity Renderer (Green bar)
-# ------------------------------------------------------------
+# -----------------------
+# Severity renderer
+# -----------------------
 def render_severity(pct):
     pct = max(0.0, min(100.0, float(pct)))
     html = f"""
@@ -354,108 +326,49 @@ def render_severity(pct):
     """
     return html
 
-
-# ------------------------------------------------------------
-# Image → NPZ Converters
-# ------------------------------------------------------------
-def convert_images_to_npz(files):
-    try:
-        stacks = []
-        for f in files:
-            im = Image.open(f).convert("L")
-            arr = np.array(im).astype(np.float32)
-            stacks.append(arr)
-
-        volume = np.stack(stacks, axis=0)
-
-        buf = io.BytesIO()
-        np.savez_compressed(buf, volume=volume)
-        buf.seek(0)
-
-        return buf.getvalue(), volume.shape
-
-    except Exception as e:
-        st.error(f"Conversion error: {e}")
-        return None, None
 # ============================================================
-#  OCULAIRE — SIDEBAR + MAIN ANALYSIS LAYOUT
+# Sidebar UI
 # ============================================================
-
-# ------------------------------------------------------------
-# Sidebar
-# ------------------------------------------------------------
 with st.sidebar:
     st.markdown("### 🔑 API Status")
     if API_KEY:
         st.success("Gemini API key configured")
     else:
         st.error("API key missing")
-        st.info("Add GEMINI_API_KEY in secrets or env variable.")
+        st.info("Add GEMINI_API_KEY to secrets or environment.")
 
     st.markdown("---")
-
     st.markdown("## 🩺 RNFLT Input & Tools")
-    rnflt_input_mode = st.radio(
-        "RNFLT input type",
-        ["NPZ (recommended)", "Single Image"]
-    )
+    rnflt_input_mode = st.radio("RNFLT input type", ["NPZ (recommended)", "Single Image"])
 
-    rnflt_conv = st.file_uploader(
-        "Upload RNFLT slices → convert to .npz",
-        accept_multiple_files=True,
-        type=["png", "jpg", "jpeg"]
-    )
+    rnflt_conv = st.file_uploader("Upload RNFLT slices → convert to .npz", accept_multiple_files=True, type=["png","jpg","jpeg"])
     if rnflt_conv:
         if st.button("Convert RNFLT slices to NPZ"):
             data, shape = convert_images_to_npz(rnflt_conv)
             if data:
                 st.success(f"Packed slices into volume shape {shape}")
-                st.download_button(
-                    "⬇️ Download RNFLT volume",
-                    data=data,
-                    file_name="rnflt_volume.npz"
-                )
+                st.download_button("⬇️ Download RNFLT volume", data=data, file_name="rnflt_volume.npz")
 
     st.markdown("---")
-
     st.markdown("## 👁️ B-Scan Input & Tools")
-    bscan_input_mode = st.radio(
-        "B-scan input type",
-        ["Image (recommended)", "NPZ (multi-slice)"]
-    )
+    bscan_input_mode = st.radio("B-scan input type", ["Image (recommended)", "NPZ (multi-slice)"])
 
-    bscan_conv = st.file_uploader(
-        "Upload B-scan slices → convert to .npz",
-        accept_multiple_files=True,
-        type=["png", "jpg", "jpeg"]
-    )
+    bscan_conv = st.file_uploader("Upload B-scan slices → convert to .npz", accept_multiple_files=True, type=["png","jpg","jpeg"])
     if bscan_conv:
         if st.button("Convert B-scan slices to NPZ"):
             data, shape = convert_images_to_npz(bscan_conv)
             if data:
                 st.success(f"Packed B-scan slices into {shape}")
-                st.download_button(
-                    "⬇️ Download B-scan volume",
-                    data=data,
-                    file_name="bscan_volume.npz"
-                )
+                st.download_button("⬇️ Download B-scan volume", data=data, file_name="bscan_volume.npz")
 
     st.markdown("---")
-    threshold = st.slider(
-        "Thin-zone threshold (µm)",
-        min_value=5, max_value=50, value=10
-    )
-
+    threshold = st.slider("Thin-zone threshold (µm)", min_value=5, max_value=50, value=10)
 
 # ============================================================
-# MAIN LAYOUT
+# Main layout: RNFLT and B-scan upload panels
 # ============================================================
-
 colA, colB = st.columns(2)
 
-# ------------------------------------------------------------
-# RNFLT Upload Panel
-# ------------------------------------------------------------
 with colA:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("🩺 RNFLT Map Analysis")
@@ -465,20 +378,11 @@ with colA:
     rnflt_pil = None
 
     if rnflt_input_mode == "NPZ (recommended)":
-        rnflt_file = st.file_uploader(
-            "Upload RNFLT .npz file",
-            type=["npz"],
-            key="rnflt_npz_main"
-        )
+        rnflt_file = st.file_uploader("Upload RNFLT .npz file", type=["npz"], key="rnflt_npz_main")
         if rnflt_file:
             rnflt_arr, rnflt_metrics = process_npz(rnflt_file)
-
     else:
-        rnflt_image = st.file_uploader(
-            "Upload single RNFLT image",
-            type=["png", "jpg", "jpeg"],
-            key="rnflt_img_main"
-        )
+        rnflt_image = st.file_uploader("Upload single RNFLT image", type=["png","jpg","jpeg"], key="rnflt_img_main")
         if rnflt_image:
             pil = Image.open(rnflt_image).convert("L")
             arr = np.array(pil).astype(float)
@@ -493,10 +397,6 @@ with colA:
             }
     st.markdown("</div>", unsafe_allow_html=True)
 
-
-# ------------------------------------------------------------
-# B-SCAN Upload Panel
-# ------------------------------------------------------------
 with colB:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("👁️ B-Scan Slice Analysis")
@@ -505,198 +405,164 @@ with colB:
     bscan_npz = None
 
     if bscan_input_mode == "Image (recommended)":
-        bscan_file = st.file_uploader(
-            "Upload B-scan image",
-            type=["png", "jpg", "jpeg"],
-        )
+        bscan_file = st.file_uploader("Upload B-scan image", type=["png","jpg","jpeg"], key="bscan_img_main")
     else:
-        bscan_npz = st.file_uploader(
-            "Upload B-scan NPZ volume",
-            type=["npz"]
-        )
+        bscan_npz = st.file_uploader("Upload B-scan NPZ volume", type=["npz"], key="bscan_npz_main")
     st.markdown("</div>", unsafe_allow_html=True)
 
-
 # ============================================================
-# START ANALYSIS WHEN ANY INPUT IS AVAILABLE
+# Run analysis if any input present
 # ============================================================
+analysis_trigger = (rnflt_arr is not None) or (bscan_file is not None) or (bscan_npz is not None)
 
-analysis_trigger = (
-    (rnflt_arr is not None) or
-    (bscan_file is not None) or
-    (bscan_npz is not None)
-)
-
+# reset local run-level lists (do not clobber top-level until after processing)
 if analysis_trigger:
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # reuse the top-level vars in case they were set earlier
-    global figs, rnflt_metrics, label_r, label_b, conf, severity_overall
+    # local run variables
+    run_figs = []      # will be appended to global figs at end
+    run_rnflt_metrics = rnflt_metrics
+    run_label_r = None
+    run_label_b = None
+    run_conf = 0.0
+    run_severity = 0.0
 
-    severity_overall = 0
-    figs = []  # Collect all matplotlib figs for PDF later
-
-    # --------------------------------------------------------
-    # RNFLT ANALYSIS
-    # --------------------------------------------------------
+    # RNFLT analysis
     if rnflt_arr is not None:
         try:
-            metrics = rnflt_metrics if rnflt_metrics is not None else {
-                "mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0
-            }
-
-            if scaler is not None and kmeans is not None:
-                X = np.array([[metrics["mean"], metrics["std"],
-                               metrics["min"], metrics["max"]]])
+            metrics = rnflt_metrics or {}
+            # clustering
+            if scaler is not None and kmeans is not None and metrics:
+                X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
                 Xs = scaler.transform(X)
                 cluster = int(kmeans.predict(Xs)[0])
-                label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
+                run_label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
             else:
                 cluster = "?"
-                label_r = "Unknown"
+                run_label_r = "Unknown"
 
             if avg_healthy is not None:
-                diff, risk, sev = compute_risk_map(
-                    rnflt_arr, avg_healthy, -threshold
-                )
+                diff, risk, sev = compute_risk_map(rnflt_arr, avg_healthy, -threshold)
             else:
                 diff = rnflt_arr - np.nanmean(rnflt_arr)
                 risk = np.where(diff < -threshold, diff, np.nan)
-                # fallback severity
-                try:
-                    sev = float(np.nanpercentile(np.nan_to_num(diff), 75))
-                except Exception:
-                    sev = 0.0
+                sev = 0.0
 
-            severity_overall = max(severity_overall, sev)
+            run_severity = max(run_severity, sev)
 
-            # Display metrics
+            # Show metrics
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Status", label_r)
-            c2.metric("Mean RNFLT", f"{metrics['mean']:.2f}")
-            c3.metric("Std Dev", f"{metrics['std']:.2f}")
+            c1.metric("Status", run_label_r)
+            if metrics:
+                c2.metric("Mean RNFLT", f"{metrics['mean']:.2f}")
+                c3.metric("Std Dev", f"{metrics['std']:.2f}")
+            else:
+                c2.metric("Mean RNFLT", "-")
+                c3.metric("Std Dev", "-")
             c4.metric("Cluster", str(cluster))
 
-            # Green severity bar
             st.markdown(render_severity(sev), unsafe_allow_html=True)
 
-            # RNFLT Figure (3-panel)
-            fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-
-            im0 = axes[0].imshow(rnflt_arr, cmap='turbo')
-            axes[0].axis('off'); axes[0].set_title("RNFLT Map")
+            # RNFLT plot (3-panel)
+            fig, axes = plt.subplots(1, 3, figsize=(18,6))
+            im0 = axes[0].imshow(rnflt_arr, cmap='turbo'); axes[0].axis('off'); axes[0].set_title("RNFLT Map")
             plt.colorbar(im0, ax=axes[0], shrink=0.85)
-
-            im1 = axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30)
-            axes[1].axis('off'); axes[1].set_title("Difference vs Healthy")
+            im1 = axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30); axes[1].axis('off'); axes[1].set_title("Difference vs Healthy")
             plt.colorbar(im1, ax=axes[1], shrink=0.85)
-
-            im2 = axes[2].imshow(risk, cmap='hot')
-            axes[2].axis('off'); axes[2].set_title("Risk Map")
+            im2 = axes[2].imshow(risk, cmap='hot'); axes[2].axis('off'); axes[2].set_title("Risk Map")
             plt.colorbar(im2, ax=axes[2], shrink=0.85)
-
             fig.patch.set_facecolor("#020802")
             st.pyplot(fig)
-            figs.append(fig)
+            run_figs.append(fig)
+
+            # carry them to global placeholders after successful generation
+            run_rnflt_metrics = metrics
 
         except Exception as e:
             st.error(f"RNFLT Error: {e}")
 
-
-    # --------------------------------------------------------
-    # B-SCAN ANALYSIS (Single Image)
-    # --------------------------------------------------------
+    # B-scan analysis (single image)
     if bscan_file:
         try:
             pil = Image.open(bscan_file).convert("L")
             batch, proc = preprocess_bscan(pil)
-
             if b_model:
                 pred_raw = float(b_model.predict(batch, verbose=0)[0][0])
-                label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
-                conf = pred_raw * 100 if label_b == "Glaucoma-like" else (1 - pred_raw) * 100
+                run_label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
+                run_conf = pred_raw*100 if run_label_b == "Glaucoma-like" else (1 - pred_raw)*100
             else:
-                label_b = "Unknown"; conf = 0.0
+                run_label_b = "Unknown"
+                run_conf = 0.0
 
-            severity_overall = max(severity_overall, conf)
+            run_severity = max(run_severity, run_conf)
 
             col1, col2 = st.columns(2)
-            col1.metric("CNN Prediction", label_b)
-            col2.metric("Confidence", f"{conf:.2f}%")
+            col1.metric("CNN Prediction", run_label_b)
+            col2.metric("Confidence", f"{run_conf:.2f}%")
+            st.markdown(render_severity(run_conf), unsafe_allow_html=True)
 
-            # Severity bar
-            st.markdown(render_severity(conf), unsafe_allow_html=True)
-
-            # Grad-CAM
+            # Grad-CAM overlay if model present
             heat = gradcam(batch, b_model) if b_model else None
             if heat is not None:
-                heat_r = cv2.resize(heat, (224, 224))
+                heat_r = cv2.resize(heat, (224,224))
                 hm = (heat_r * 255).astype(np.uint8)
                 hm_color = cv2.applyColorMap(hm, cv2.COLORMAP_JET)
-
                 overlay = (np.stack([proc]*3, axis=-1) * 255).astype(np.uint8)
                 overlay = cv2.addWeighted(overlay, 0.6, hm_color, 0.4, 0)
-
                 st.image([pil, overlay], caption=["Original", "Grad-CAM"], use_column_width=True)
 
-                # Store visualization fig for PDF
-                fig2, ax2 = plt.subplots(1, 2, figsize=(14, 6))
-                ax2[0].imshow(pil, cmap="gray"); ax2[0].axis("off"); ax2[0].set_title("B-Scan")
-                ax2[1].imshow(overlay); ax2[1].axis("off"); ax2[1].set_title("Grad-CAM Overlay")
+                # Save a figure pair for PDF
+                fig2, ax2 = plt.subplots(1,2,figsize=(14,6))
+                ax2[0].imshow(pil, cmap='gray'); ax2[0].axis('off'); ax2[0].set_title("B-Scan")
+                ax2[1].imshow(overlay); ax2[1].axis('off'); ax2[1].set_title("Grad-CAM Overlay")
                 fig2.patch.set_facecolor("#020802")
-                figs.append(fig2)
+                run_figs.append(fig2)
             else:
                 st.image(pil, caption="Original B-Scan", use_column_width=True)
 
         except Exception as e:
             st.error(f"B-Scan Error: {e}")
 
-
-    # --------------------------------------------------------
-    # Combined Severity
-    # --------------------------------------------------------
+    # Combined severity summary
     st.markdown("<hr>", unsafe_allow_html=True)
     st.markdown("<h3 style='text-align:center; color:#39ff14;'>Overall Severity Index</h3>", unsafe_allow_html=True)
-    st.markdown(render_severity(severity_overall), unsafe_allow_html=True)
+    st.markdown(render_severity(run_severity), unsafe_allow_html=True)
 
-    # --------------------------------------------------------
-    # Downloads (PNG + PDF)
-    # PDF is implemented in Chunk 4
-    # --------------------------------------------------------
-    if figs:
+    # If we got visuals, collect them in top-level figs and set session state for PDF
+    if run_figs:
+        # update module-level global placeholders (safe because at top-level)
+        figs = run_figs
+        rnflt_metrics = run_rnflt_metrics
+        label_r = run_label_r
+        label_b = run_label_b
+        conf = run_conf
+        severity_overall = run_severity
+
+        # Keep a copy in session_state so it survives reruns for PDF generation
+        st.session_state["pdf_figs"] = figs
+        st.session_state["pdf_rnflt_metrics"] = rnflt_metrics
+        st.session_state["pdf_rnflt_cluster"] = label_r
+        st.session_state["pdf_rnflt_severity"] = severity_overall
+        st.session_state["pdf_bscan_label"] = label_b
+        st.session_state["pdf_bscan_conf"] = conf
+
         png_bytes = fig_to_png(figs[0])
         st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png")
 
-        st.session_state["pdf_figs"] = figs
-        st.session_state["pdf_rnflt_metrics"] = rnflt_metrics
-        st.session_state["pdf_rnflt_cluster"] = label_r if label_r is not None else None
-        st.session_state["pdf_rnflt_severity"] = severity_overall
-        st.session_state["pdf_bscan_label"] = label_b if label_b is not None else None
-        st.session_state["pdf_bscan_conf"] = conf if conf is not None else 0
-
-        # Button will call final PDF generator (Chunk 4)
         if st.button("📄 Generate Full Medical Report (PDF)"):
             st.session_state["trigger_pdf"] = True
 
 # ============================================================
-#  OCULAIRE — FULL MEDICAL PDF REPORT ENGINE (6+ PAGES)
-#  Option C:
-#    • COVER PAGE = Cyan + Magenta neon branding
-#    • OTHER PAGES = Green-accent clinical theme
+# PDF generation engine
+# - clinical description text color set to blue (#00aaff)
 # ============================================================
-
 def generate_full_pdf(figs,
                       rnflt_metrics=None,
                       rnflt_cluster=None,
                       rnflt_severity=None,
                       bscan_label=None,
                       bscan_conf=None):
-    """Generates the complete multi-page OCULAIRE medical report."""
     buffer = io.BytesIO()
-
-    # --------------------------------------------------------
-    # Base PDF template
-    # --------------------------------------------------------
     doc = SimpleDocTemplate(
         buffer,
         pagesize=letter,
@@ -705,48 +571,38 @@ def generate_full_pdf(figs,
     )
     styles = getSampleStyleSheet()
 
-    # Custom styles
-    title = ParagraphStyle(
-        "TitleGlow", parent=styles["Title"],
-        fontSize=28, textColor=colors.HexColor("#00eaff"),
-        leading=32, alignment=1
-    )
-    subtitle = ParagraphStyle(
-        "Subtitle", parent=styles["Heading2"],
-        fontSize=14, textColor=colors.HexColor("#ff40c4"),
-        alignment=1, leading=18
-    )
-    header_green = ParagraphStyle(
-        "HeaderGreen", parent=styles["Heading2"],
-        textColor=colors.HexColor("#39ff14"),
-        fontSize=18
-    )
-    # <<< CHANGED: report description/body text set to neon blue per request >>>
-    body = ParagraphStyle(
-        "Body", parent=styles["BodyText"],
-        fontSize=11, leading=15,
-        textColor=colors.HexColor("#00bfff")   # neon blue description text
-    )
-    body_small = ParagraphStyle(
-        "Small", parent=styles["BodyText"],
-        fontSize=9, leading=12,
-        textColor=colors.HexColor("#7fdfff")
-    )
+    # Title/Cover styles
+    title = ParagraphStyle("TitleGlow", parent=styles["Title"],
+                           fontSize=28, textColor=colors.HexColor("#00eaff"),
+                           leading=32, alignment=1)
+    subtitle = ParagraphStyle("Subtitle", parent=styles["Heading2"],
+                              fontSize=14, textColor=colors.HexColor("#ff40c4"),
+                              alignment=1, leading=18)
+    header_green = ParagraphStyle("HeaderGreen", parent=styles["Heading2"],
+                                  textColor=colors.HexColor("#39ff14"), fontSize=18)
+    # BODY: default greenish for other parts
+    body = ParagraphStyle("Body", parent=styles["BodyText"],
+                          fontSize=11, leading=15,
+                          textColor=colors.HexColor("#e0ffe0"))
+    # Small body
+    body_small = ParagraphStyle("Small", parent=styles["BodyText"],
+                               fontSize=9, leading=12,
+                               textColor=colors.HexColor("#d0ffd0"))
+    # CLINICAL INTERPRETATION TEXT STYLE (blue)
+    clinical_blue = ParagraphStyle("ClinicalBlue", parent=styles["BodyText"],
+                                   fontSize=11, leading=16,
+                                   textColor=colors.HexColor("#00aaff"))
 
     story = []
 
-    # ============================================================
-    #  PAGE 1: COVER PAGE — Cyan/Magenta Neon
-    # ============================================================
-
+    # Cover
     story.append(Paragraph("OCULAIRE", title))
     story.append(Paragraph("AI-Powered Glaucoma Screening Report", subtitle))
     story.append(Spacer(1, 25))
 
-    # Metadata table
+    # Metadata
     report_id = "OCU-" + datetime.now().strftime("%Y%m%d%H%M%S")
     gen_date = datetime.now().strftime("%B %d, %Y — %I:%M %p")
-
     metadata = [
         ["Report Generated:", gen_date],
         ["Analysis Type:", "RNFLT + B-Scan"],
@@ -761,12 +617,11 @@ def generate_full_pdf(figs,
         ("BOX", (0,0), (-1,-1), 1, colors.HexColor("#00eaff")),
         ("FONTNAME", (0,0), (-1,-1), "Helvetica")
     ]))
-
     story.append(meta_table)
     story.append(Spacer(1, 25))
 
-    # Executive Summary (Color-coded)
-    if rnflt_cluster == "Glaucoma-like" or bscan_label == "Glaucoma-like":
+    # Executive summary box (color-coded)
+    if (rnflt_cluster == "Glaucoma-like") or (bscan_label == "Glaucoma-like"):
         risk_color = colors.HexColor("#ff3b3b")
         risk_text = "⚠️ ABNORMAL PATTERNS DETECTED"
         risk_level = ("HIGH" if (rnflt_severity or 0) >= 60 else
@@ -777,20 +632,15 @@ def generate_full_pdf(figs,
         risk_text = "✅ NORMAL PATTERNS DETECTED"
         risk_level = "LOW"
 
-    # ensure numeric safe defaults
-    rnflt_severity_safe = float(rnflt_severity) if rnflt_severity is not None else 0.0
-    bscan_conf_safe = float(bscan_conf) if bscan_conf is not None else 0.0
-
     exec_box = Paragraph(
         f"""
         <b>Status:</b> {risk_text}<br/>
         <b>Risk Level:</b> {risk_level}<br/>
-        <b>Severity Index:</b> {rnflt_severity_safe:.1f}%<br/>
-        <b>CNN Confidence:</b> {bscan_conf_safe:.1f}%<br/>
+        <b>Severity Index:</b> {(rnflt_severity or 0):.1f}%<br/>
+        <b>CNN Confidence:</b> {(bscan_conf or 0):.1f}%<br/>
         """,
         body
     )
-
     box_table = Table([[exec_box]], colWidths=[450])
     box_table.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,-1), risk_color),
@@ -801,38 +651,34 @@ def generate_full_pdf(figs,
         ("TOPPADDING", (0,0), (-1,-1), 10),
         ("BOTTOMPADDING", (0,0), (-1,-1), 10),
     ]))
-
     story.append(box_table)
     story.append(PageBreak())
 
-    # ============================================================
-    #  PAGE 2 — CLINICAL INTERPRETATION & RNFLT STATS
-    # ============================================================
-
+    # Page 2 — Clinical interpretation (blue body text)
     story.append(Paragraph("CLINICAL INTERPRETATION", header_green))
     story.append(Spacer(1, 12))
 
     if rnflt_cluster == "Glaucoma-like":
-        story.append(Paragraph("""
+        clinical_text = """
         The AI analysis has detected <b>patterns consistent with glaucomatous changes</b>
         in your retinal nerve fiber layer structure. This includes thinning in clinically
         significant regions relative to the healthy reference database.
-        """, body))
+        """
     else:
-        story.append(Paragraph("""
+        clinical_text = """
         The retinal nerve fiber layer thickness pattern appears <b>within normal ranges</b>,
         showing no significant signs of glaucomatous thinning. Structural integrity of
         the optic nerve is preserved.
-        """, body))
-
+        """
+    story.append(Paragraph(clinical_text, clinical_blue))
     story.append(Spacer(1, 18))
-    story.append(Paragraph("<b>Key Findings</b>", body))
+    story.append(Paragraph("<b>Key Findings</b>", clinical_blue))
     story.append(Spacer(1, 6))
 
     if rnflt_cluster == "Glaucoma-like":
         findings = [
             "- RNFL thinning detected in critical sectors.",
-            f"- {rnflt_severity_safe:.1f}% of retinal area flagged as at-risk.",
+            f"- {(rnflt_severity or 0):.1f}% of retinal area flagged as at-risk.",
             "- Pattern deviation from healthy baseline exceeds threshold.",
             "- Suggestive of early-to-moderate glaucomatous damage.",
         ]
@@ -843,57 +689,48 @@ def generate_full_pdf(figs,
             "- Pattern matches healthy reference distribution.",
             "- Optic nerve structure appears well-maintained.",
         ]
-
     for f in findings:
-        story.append(Paragraph(f, body))
+        story.append(Paragraph(f, clinical_blue))
 
     story.append(Spacer(1, 16))
     story.append(Paragraph("<b>RNFLT Measurements</b>", header_green))
     story.append(Spacer(1, 6))
-
-    # safe rnflt_metrics fallback
-    rnflt_metrics_safe = rnflt_metrics if rnflt_metrics is not None else {
-        "mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0
-    }
-
-    rnflt_tbl = [
-        ["Mean Thickness", f"{rnflt_metrics_safe['mean']:.2f} μm"],
-        ["Standard Deviation", f"{rnflt_metrics_safe['std']:.2f} μm"],
-        ["Minimum", f"{rnflt_metrics_safe['min']:.2f} μm"],
-        ["Maximum", f"{rnflt_metrics_safe['max']:.2f} μm"],
-    ]
+    if rnflt_metrics:
+        rnflt_tbl = [
+            ["Mean Thickness", f"{rnflt_metrics['mean']:.2f} μm"],
+            ["Standard Deviation", f"{rnflt_metrics['std']:.2f} μm"],
+            ["Minimum", f"{rnflt_metrics['min']:.2f} μm"],
+            ["Maximum", f"{rnflt_metrics['max']:.2f} μm"],
+        ]
+    else:
+        rnflt_tbl = [
+            ["Mean Thickness", "-"],
+            ["Standard Deviation", "-"],
+            ["Minimum", "-"],
+            ["Maximum", "-"],
+        ]
     rnflt_table = Table(rnflt_tbl, colWidths=[200, 200])
     rnflt_table.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,-1), colors.Color(0.02, 0.2, 0.02)),
         ("TEXTCOLOR", (0,0), (-1,-1), colors.HexColor("#ccffcc")),
         ("GRID", (0,0), (-1,-1), 0.5, colors.HexColor("#39ff14")),
     ]))
-
     story.append(rnflt_table)
     story.append(PageBreak())
 
-    # ============================================================
-    #  PAGE 3 — RNFLT + B-SCAN IMAGES
-    # ============================================================
-
+    # Page 3 — Images
     story.append(Paragraph("DETAILED VISUAL ANALYSIS", header_green))
     story.append(Spacer(1, 10))
-
-    for fig in figs:
+    for fig in figs or []:
         png = fig_to_png(fig)
         img = RLImage(io.BytesIO(png), width=6.5*inch, height=3.2*inch)
         story.append(img)
         story.append(Spacer(1, 20))
-
     story.append(PageBreak())
 
-    # ============================================================
-    #  PAGE 4 — Symptoms & Risk Factors
-    # ============================================================
-
+    # Page 4 — Symptoms & Risks
     story.append(Paragraph("SYMPTOMS & RISK FACTORS", header_green))
     story.append(Spacer(1, 12))
-
     if rnflt_cluster == "Glaucoma-like":
         symptoms = [
             "- Gradual peripheral vision loss",
@@ -908,14 +745,12 @@ def generate_full_pdf(figs,
             "- Persistent headaches",
             "- Difficulty adapting to darkness",
         ]
-
-    story.append(Paragraph("<b>Symptoms to Monitor:</b>", body))
+    story.append(Paragraph("<b>Symptoms to Monitor:</b>", clinical_blue))
     for s in symptoms:
-        story.append(Paragraph(s, body))
+        story.append(Paragraph(s, clinical_blue))
 
     story.append(Spacer(1, 12))
-    story.append(Paragraph("<b>Major Risk Factors:</b>", body))
-
+    story.append(Paragraph("<b>Major Risk Factors:</b>", clinical_blue))
     risks = [
         "Age >60 years",
         "Family history of glaucoma",
@@ -927,17 +762,12 @@ def generate_full_pdf(figs,
         "Long-term steroid use",
     ]
     for r in risks:
-        story.append(Paragraph(f"- {r}", body))
-
+        story.append(Paragraph(f"- {r}", clinical_blue))
     story.append(PageBreak())
 
-    # ============================================================
-    #  PAGE 5 — Recommendations, Treatment, Lifestyle, Monitoring
-    # ============================================================
-
+    # Page 5 — Recommendations
     story.append(Paragraph("RECOMMENDATIONS & ACTION PLAN", header_green))
     story.append(Spacer(1, 12))
-
     if rnflt_cluster == "Glaucoma-like":
         recs = [
             "Schedule ophthalmologist visit within 1–2 weeks.",
@@ -950,13 +780,11 @@ def generate_full_pdf(figs,
             "Maintain healthy lifestyle habits.",
             "Document this baseline for future comparison.",
         ]
-
     for r in recs:
-        story.append(Paragraph(f"- {r}", body))
+        story.append(Paragraph(f"- {r}", clinical_blue))
 
     story.append(Spacer(1, 18))
-    story.append(Paragraph("<b>Lifestyle Recommendations:</b>", body))
-
+    story.append(Paragraph("<b>Lifestyle Recommendations:</b>", clinical_blue))
     lifestyle = [
         "Maintain antioxidant-rich diet.",
         "Regular aerobic activity.",
@@ -966,25 +794,19 @@ def generate_full_pdf(figs,
         "Take screen breaks (20–20–20 rule)."
     ]
     for l in lifestyle:
-        story.append(Paragraph(f"- {l}", body))
-
+        story.append(Paragraph(f"- {l}", clinical_blue))
     story.append(PageBreak())
 
-    # ============================================================
-    #  PAGE 6 — Disclaimers, Methodology, References
-    # ============================================================
-
+    # Page 6 — Disclaimer & refs
     story.append(Paragraph("IMPORTANT MEDICAL DISCLAIMER", header_green))
     story.append(Spacer(1, 12))
     story.append(Paragraph("""
     This OCULAIRE report is for research and educational purposes only. It is not a
     medical diagnosis. Always consult an ophthalmologist for clinical decisions.
-    """, body))
-
+    """, clinical_blue))
     story.append(Spacer(1, 18))
     story.append(Paragraph("<b>Methodology & References</b>", header_green))
     story.append(Spacer(1, 12))
-
     refs = [
         "Weinreb RN et al., JAMA 2014",
         "Tham YC et al., Ophthalmology 2014",
@@ -998,40 +820,45 @@ def generate_full_pdf(figs,
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
+
 # ============================================================
-# FINAL ASSEMBLY — Build Report + Download Button
+# If the user pressed the PDF trigger, create & offer download
 # ============================================================
+if st.session_state.get("trigger_pdf", False):
+    # Only proceed if we have figs stored
+    stored_figs = st.session_state.get("pdf_figs", None)
+    stored_metrics = st.session_state.get("pdf_rnflt_metrics", None)
+    stored_cluster = st.session_state.get("pdf_rnflt_cluster", None)
+    stored_severity = st.session_state.get("pdf_rnflt_severity", 0.0)
+    stored_bscan_label = st.session_state.get("pdf_bscan_label", None)
+    stored_bscan_conf = st.session_state.get("pdf_bscan_conf", 0.0)
 
-# Use session_state triggers to generate PDF on demand (safer)
-if st.session_state.get("trigger_pdf", False) or (figs and st.button("📄 Generate Full Medical Report (PDF)")):
-    try:
-        # safe defaults for metrics if missing
-        rnflt_metrics_to_pass = rnflt_metrics if rnflt_metrics is not None else {
-            "mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0
-        }
-        final_pdf = generate_full_pdf(
-            figs=figs,
-            rnflt_metrics=rnflt_metrics_to_pass,
-            rnflt_cluster=label_r if label_r is not None else None,
-            rnflt_severity=severity_overall,
-            bscan_label=label_b if label_b is not None else None,
-            bscan_conf=conf if conf is not None else 0
-        )
+    if stored_figs:
+        try:
+            final_pdf = generate_full_pdf(
+                figs=stored_figs,
+                rnflt_metrics=stored_metrics,
+                rnflt_cluster=stored_cluster,
+                rnflt_severity=stored_severity,
+                bscan_label=stored_bscan_label,
+                bscan_conf=stored_bscan_conf
+            )
+            st.markdown("<hr>", unsafe_allow_html=True)
+            st.subheader("📄 Download Full OCULAIRE Medical Report")
+            st.download_button(
+                label="📄 Download Full PDF Report (6 Pages)",
+                data=final_pdf,
+                file_name="OCULAIRE_Full_Report.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.error(f"PDF generation error: {e}")
+    else:
+        st.warning("No visuals found to create a full report. Upload RNFLT or B-scan and generate again.")
+    # reset trigger to avoid auto re-generation on rerun unless user presses again
+    st.session_state["trigger_pdf"] = False
 
-        st.markdown("<hr>", unsafe_allow_html=True)
-        st.subheader("📄 Download Full OCULAIRE Medical Report")
-
-        st.download_button(
-            label="📄 Download Full PDF Report (6 Pages)",
-            data=final_pdf,
-            file_name="OCULAIRE_Full_Report.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
-
-        # reset the trigger so repeated clicks don't re-generate unexpectedly
-        st.session_state["trigger_pdf"] = False
-
-    except Exception as e:
-        st.error(f"PDF generation error: {e}")
-
+# Footer
+st.markdown("<hr>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;color:#b8ffb8;padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
