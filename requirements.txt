@@ -9,3 +9,5 @@ opencv-python-headless
 Pillow
 google-genai
 google-generativeai
+requests
+reportlab
