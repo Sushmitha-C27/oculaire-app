@@ -144,33 +144,111 @@ st.markdown("""
 }
 
 /* add a pulsing icon */
-.floating-expander > div > details > summary::before {
-  content: "💬";
-  font-size: 22px;
-  margin-right: 6px;
-  animation: icon-beat 1.6s ease-in-out infinite;
+/* ----------------- ROBUST NEON EXPANDER STYLES (covers multiple Streamlit DOM shapes) ----------------- */
+
+/* container */
+.floating-expander {
+  position: fixed !important;
+  bottom: 20px !important;
+  right: 20px !important;
+  width: 440px !important;
+  max-width: 92vw !important;
+  z-index: 99999 !important;
+  pointer-events: auto !important;
 }
 
-/* hover & open */
+/* target multiple possible detail/summary placements that Streamlit might render */
+.floating-expander details,
+.floating-expander > div > details,
+.floating-expander div details,
+.floating-expander summary,
+.floating-expander > div > summary,
+.floating-expander div summary {
+  box-sizing: border-box !important;
+}
+
+/* the neon card wrapper (applies to whichever details element exists) */
+.floating-expander details,
+.floating-expander > div > details,
+.floating-expander div details {
+  background: linear-gradient(180deg, rgba(6,10,24,0.98), rgba(2,2,8,0.98)) !important;
+  border: 2px solid rgba(0,245,255,0.75) !important;
+  border-radius: 18px !important;
+  padding: 6px !important;
+  box-shadow: 0 30px 90px rgba(0,245,255,0.12), 0 30px 120px rgba(255,64,196,0.08) !important;
+  animation: neon-beat 2.0s ease-in-out infinite !important;
+}
+
+/* Neon gradient summary (the clickable bar) — wide selection to ensure target */
+.floating-expander summary,
+.floating-expander > div > details > summary,
+.floating-expander div summary,
+.floating-expander > div > summary {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 14px 18px !important;
+  margin: 10px !important;
+  border-radius: 14px !important;
+  cursor: pointer !important;
+
+  /* BRIGHT NEON gradient, forced */
+  background: linear-gradient(90deg, rgba(0,245,255,1), rgba(72,200,255,1) 40%, rgba(255,64,196,1) 100%) !important;
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  font-size: 17px !important;
+  text-shadow: 0 0 10px rgba(0,0,0,0.6) !important;
+  box-shadow: 0 12px 48px rgba(0,245,255,0.45) !important;
+  -webkit-text-fill-color: white !important;
+  -webkit-background-clip: none !important;
+}
+
+/* Force any icon/text inside to be white and visible */
+.floating-expander summary * {
+  color: #fff !important;
+  fill: #fff !important;
+}
+
+/* add pulsing icon before the label */
+.floating-expander summary::before,
+.floating-expander > div > details > summary::before,
+.floating-expander div summary::before {
+  content: "💬" !important;
+  font-size: 22px !important;
+  margin-right: 6px !important;
+  display: inline-block !important;
+  animation: pulse-icon 1.6s ease-in-out infinite !important;
+}
+
+/* hover */
+.floating-expander summary:hover,
 .floating-expander > div > details > summary:hover {
   transform: translateY(-4px) scale(1.02) !important;
-  box-shadow: 0 16px 60px rgba(0,245,255,0.6), 0 12px 45px rgba(255,64,196,0.5) !important;
+  box-shadow: 0 22px 80px rgba(0,245,255,0.7), 0 20px 60px rgba(255,64,196,0.6) !important;
 }
 
-.floating-expander > div > details[open] > summary {
-  box-shadow: 0 26px 90px rgba(0,245,255,0.8), 0 20px 70px rgba(255,64,196,0.6) !important;
+/* opened state stronger glow */
+.floating-expander details[open] summary,
+.floating-expander > div > details[open] summary {
+  box-shadow: 0 30px 120px rgba(0,245,255,0.85), 0 30px 140px rgba(255,64,196,0.75) !important;
 }
 
-/* Animations */
-@keyframes float-slow { 0% { transform: translateY(0px); } 50% { transform: translateY(-6px); } 100% { transform: translateY(0px); } }
-@keyframes neon-beat { 0%,100% { box-shadow: 0 0 25px rgba(0,245,255,0.4), 0 0 35px rgba(255,64,196,0.35); } 50% { box-shadow: 0 0 55px rgba(0,245,255,0.9), 0 0 75px rgba(255,64,196,0.85); } }
-@keyframes icon-beat { 0% { transform: scale(1); } 50% { transform: scale(1.18); } 100% { transform: scale(1); } }
+/* animations */
+@keyframes neon-beat {
+  0%,100% { box-shadow: 0 0 30px rgba(0,245,255,0.45), 0 0 50px rgba(255,64,196,0.35); }
+  50%  { box-shadow: 0 0 70px rgba(0,245,255,0.95), 0 0 110px rgba(255,64,196,0.85); }
+}
+@keyframes pulse-icon { 0% { transform: scale(1); } 50% { transform: scale(1.18); } 100% { transform: scale(1); } }
 
-/* responsive */
+/* responsive shrink */
 @media (max-width: 480px) {
   .floating-expander { right: 12px !important; bottom: 12px !important; width: 92vw !important; }
-  .floating-expander > div > details > summary { font-size: 15px !important; padding: 12px 14px !important; margin: 8px !important; }
+  .floating-expander summary { padding: 10px 12px !important; font-size: 15px !important; margin: 8px !important; }
 }
+
+/* ensure forced visibility on top of everything (extreme) */
+.floating-expander, .floating-expander * { z-index: 2147483647 !important; pointer-events: auto !important; }
+
 
 /* hide streamlit footer (optional) */
 footer { visibility: hidden; }
