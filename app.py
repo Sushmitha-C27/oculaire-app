@@ -228,16 +228,24 @@ st.markdown("""
   margin-bottom: 12px !important;
 }
 
-/* Pulsing icon animation */
+/* Pulsing icon animation with neon glow */
 @keyframes pulse-icon {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.15); opacity: 0.85; }
+  0%, 100% { 
+    transform: scale(1); 
+    filter: drop-shadow(0 0 8px rgba(0,245,255,0.8)) drop-shadow(0 0 15px rgba(255,64,196,0.6));
+  }
+  50% { 
+    transform: scale(1.2); 
+    filter: drop-shadow(0 0 15px rgba(0,245,255,1)) drop-shadow(0 0 25px rgba(255,64,196,0.9));
+  }
 }
 
 .floating-expander details summary::before {
   content: "💬";
-  font-size: 24px;
-  animation: pulse-icon 2s ease-in-out infinite;
+  font-size: 26px;
+  display: inline-block;
+  animation: pulse-icon 1.5s ease-in-out infinite;
+  margin-right: 8px;
 }
 
 footer { visibility:hidden; }
