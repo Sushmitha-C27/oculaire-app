@@ -26,10 +26,15 @@ except Exception:
 # -----------------------
 st.markdown("""
 <div class="header" style="display:flex;flex-direction:column;align-items:center;justify-content:center;margin-top:18px;margin-bottom:22px;">
+  <!-- top centered placeholder box with reversed eye -->
+  <div class="placeholder-box" style="width:120px;height:120px;border:1px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;margin-bottom:18px;border-radius:6px;background:rgba(255,255,255,0.01);box-shadow:0 8px 40px rgba(0,0,0,0.6);">
+    <img src="/mnt/data/3d95380c-230a-438f-b614-3a6133ab1352.png" alt="eye" class="placeholder-eye" style="width:68px; height:68px; object-fit:contain; transform: scaleX(-1); filter: drop-shadow(0 8px 20px rgba(0,245,255,0.15)) saturate(1.2);"/>
+  </div>
+
   <div class="hud-panel">
     <div class="hud-inner">
-      <!-- Rotating eye SVG (inline for crisp animation) -->
-      <div class="eye-wrap" aria-hidden="true">
+      <!-- Rotating eye SVG (kept subtle behind title) -->
+      <div class="eye-wrap" aria-hidden="true" style="pointer-events:none; opacity:0.9;">
         <svg class="eye-svg" viewBox="0 0 100 100" width="110" height="110" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
           <defs>
             <radialGradient id="g1" cx="50%" cy="40%" r="60%">
@@ -37,28 +42,17 @@ st.markdown("""
               <stop offset="60%" stop-color="#05c" stop-opacity="0.9"/>
               <stop offset="100%" stop-color="#020617" stop-opacity="0.6"/>
             </radialGradient>
-            <filter id="f1" x="-50%" y="-50%" width="200%" height="200%">
-              <feGaussianBlur stdDeviation="4" result="b"/>
-              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-            </filter>
           </defs>
           <g transform="translate(50 50)">
             <g class="rotor">
-              <circle r="36" fill="url(#g1)" stroke="rgba(255,255,255,0.06)" stroke-width="0.8"></circle>
-              <path d="M-36,0 C-20,-26 20,-26 36,0 C20,26 -20,26 -36,0 Z" fill="rgba(255,255,255,0.02)"></path>
-              <circle r="18" fill="#0af" opacity="0.95"></circle>
+              <circle r="36" fill="url(#g1)" stroke="rgba(255,255,255,0.02)" stroke-width="0.6"></circle>
+              <circle r="18" fill="#0af" opacity="0.85"></circle>
               <circle r="8" fill="#001"/>
-            </g>
-            <!-- outer HUD ring -->
-            <g class="hud-ring">
-              <circle r="45" fill="none" stroke="rgba(0,245,255,0.06)" stroke-width="1"></circle>
-              <g class="ticks">
-                <!-- subtle ticks created with repeated lines via CSS transform on the group -->
-              </g>
             </g>
           </g>
         </svg>
       </div>
+
       <div class="title-block">
         <h1 class="oculaire-title">OCULAIRE</h1>
         <h2 class="oculaire-sub">Illuminating Vision. Detecting Glaucoma.</h2>
@@ -69,6 +63,10 @@ st.markdown("""
 </div>
 
 <style>
+.placeholder-box{backdrop-filter: blur(6px);}
+.placeholder-eye{transition: transform 0.9s ease, filter 0.9s ease;}
+.placeholder-box:hover .placeholder-eye{transform: scaleX(-1) scale(1.04); filter: drop-shadow(0 12px 28px rgba(0,245,255,0.24)) saturate(1.4);} 
+
 /* HUD panel */
 .hud-panel{
   width:100%; max-width:1100px; border-radius:18px; padding:18px; box-sizing:border-box;
@@ -85,50 +83,41 @@ st.markdown("""
 
 .hud-inner{display:flex; align-items:center; gap:28px; justify-content:center; padding:12px;}
 .eye-wrap{width:120px; height:120px; display:flex; align-items:center; justify-content:center;}
-.eye-svg{filter: drop-shadow(0 10px 25px rgba(0,245,255,0.06));}
+.eye-svg{filter: drop-shadow(0 10px 25px rgba(0,245,255,0.06)); opacity:0.18}
 
 /* rotating rotor */
 .rotor{ transform-origin:0 0; }
-.eye-svg .rotor{ animation: eye-rotate 6s linear infinite; }
+.eye-svg .rotor{ animation: eye-rotate 12s linear infinite; }
 @keyframes eye-rotate{ 0%{ transform: rotate(0deg) } 100%{ transform: rotate(360deg) } }
 
 /* HUD scanlines */
-.hud-panel{background-image: linear-gradient(transparent 0%, rgba(255,255,255,0.008) 1%, transparent 2%); background-size:100% 14px;}
+.hud-panel{background-image: linear-gradient(transparent 0%, rgba(255,255,255,0.006) 1%, transparent 2%); background-size:100% 14px;}
 @keyframes scan { 0% { background-position-y:0 } 100% { background-position-y:28px } }
-.hud-panel{ animation: scan 6s linear infinite; }
+.hud-panel{ animation: scan 8s linear infinite; }
 
 /* title styles */
-.title-block{ text-align:left; min-width:420px;}
+.title-block{ text-align:center; min-width:420px;}
 .oculaire-title{
-  font-size:56px;
-  margin:0;
-  letter-spacing:6px;
-  font-weight:900;
-  color:transparent;
-  -webkit-background-clip:text;
-  background: linear-gradient(90deg,#bde8ff,#e6c4ff,#bde8ff);
-  background-size:200% auto;
-  animation: titleGlow 4s ease-in-out infinite alternate, titleColorShift 8s linear infinite;
-  text-shadow: 0 0 30px rgba(120,150,255,0.35), 0 0 55px rgba(0,245,255,0.4);
+  font-size:62px; margin:6px 0 0 0; letter-spacing:8px; font-weight:900; color:transparent; -webkit-background-clip:text;
+  background: linear-gradient(90deg,#bde8ff,#e6c4ff,#bde8ff); background-size:200% auto;
+  animation: titleGlow 4s ease-in-out infinite alternate, titleColorShift 8s linear infinite; text-shadow: 0 0 38px rgba(120,150,255,0.28);
 }
-.oculaire-sub{ margin:6px 0 0 0; color:#a7b8d9; font-weight:600; font-size:18px }
-.oculaire-tag{ margin:6px 0 0 0; color:#7fb0ff; font-weight:500; opacity:0.95; font-size:14px }
+.oculaire-sub{ margin:10px 0 0 0; color:#a7b8d9; font-weight:600; font-size:18px }
+.oculaire-tag{ margin:8px 0 0 0; color:#7fb0ff; font-weight:500; opacity:0.95; font-size:14px }
 
 /* ring subtle movement */
 .hud-ring{ opacity:0.9; }
 
 /* responsive */
 @media (max-width:900px){ .hud-inner{flex-direction:column-reverse; gap:12px} .title-block{text-align:center} .title-block{min-width:unset} }
+
 @keyframes titleGlow {
   0% { text-shadow: 0 0 25px rgba(0,245,255,0.45), 0 0 40px rgba(255,64,196,0.45), 0 0 60px rgba(0,180,255,0.4); transform:scale(1); }
-  50% { text-shadow: 0 0 45px rgba(0,245,255,0.8), 0 0 70px rgba(255,64,196,0.7), 0 0 90px rgba(0,180,255,0.7); transform:scale(1.03); }
+  50% { text-shadow: 0 0 55px rgba(0,245,255,0.9), 0 0 85px rgba(255,64,196,0.8), 0 0 110px rgba(0,180,255,0.8); transform:scale(1.04); }
   100% { text-shadow: 0 0 30px rgba(0,245,255,0.5), 0 0 50px rgba(255,64,196,0.5), 0 0 70px rgba(0,180,255,0.45); transform:scale(1); }
 }
 
-@keyframes titleColorShift {
-  0% { background-position:0% center; }
-  100% { background-position:200% center; }
-}
+@keyframes titleColorShift { 0% { background-position:0% center; } 100% { background-position:200% center; } }
 </style>
 """, unsafe_allow_html=True)
 
