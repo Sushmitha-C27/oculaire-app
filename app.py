@@ -99,7 +99,18 @@ st.markdown("""
 
 /* title styles */
 .title-block{ text-align:left; min-width:420px;}
-.oculaire-title{ font-size:56px; margin:0; letter-spacing:6px; font-weight:900; color:transparent; -webkit-background-clip:text; background: linear-gradient(90deg,#cfe9ff,#d8b8ff); text-shadow: 0 0 30px rgba(120,150,255,0.18); }
+.oculaire-title{
+  font-size:56px;
+  margin:0;
+  letter-spacing:6px;
+  font-weight:900;
+  color:transparent;
+  -webkit-background-clip:text;
+  background: linear-gradient(90deg,#bde8ff,#e6c4ff,#bde8ff);
+  background-size:200% auto;
+  animation: titleGlow 4s ease-in-out infinite alternate, titleColorShift 8s linear infinite;
+  text-shadow: 0 0 30px rgba(120,150,255,0.35), 0 0 55px rgba(0,245,255,0.4);
+}
 .oculaire-sub{ margin:6px 0 0 0; color:#a7b8d9; font-weight:600; font-size:18px }
 .oculaire-tag{ margin:6px 0 0 0; color:#7fb0ff; font-weight:500; opacity:0.95; font-size:14px }
 
@@ -108,6 +119,16 @@ st.markdown("""
 
 /* responsive */
 @media (max-width:900px){ .hud-inner{flex-direction:column-reverse; gap:12px} .title-block{text-align:center} .title-block{min-width:unset} }
+@keyframes titleGlow {
+  0% { text-shadow: 0 0 25px rgba(0,245,255,0.45), 0 0 40px rgba(255,64,196,0.45), 0 0 60px rgba(0,180,255,0.4); transform:scale(1); }
+  50% { text-shadow: 0 0 45px rgba(0,245,255,0.8), 0 0 70px rgba(255,64,196,0.7), 0 0 90px rgba(0,180,255,0.7); transform:scale(1.03); }
+  100% { text-shadow: 0 0 30px rgba(0,245,255,0.5), 0 0 50px rgba(255,64,196,0.5), 0 0 70px rgba(0,180,255,0.45); transform:scale(1); }
+}
+
+@keyframes titleColorShift {
+  0% { background-position:0% center; }
+  100% { background-position:200% center; }
+}
 </style>
 """, unsafe_allow_html=True)
 
