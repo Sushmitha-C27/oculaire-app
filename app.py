@@ -32,21 +32,19 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
+# Optional: keep last processed question to avoid duplicates if you use URL-nav elsewhere
+if 'last_processed_q' not in st.session_state:
+    st.session_state['last_processed_q'] = None
+
 # Get API key from Streamlit secrets or environment variable
-# Priority: Streamlit secrets > Environment variable > User input
 def get_api_key():
-    # Try Streamlit secrets first (for deployment)
     try:
         return st.secrets["GEMINI_API_KEY"]
-    except:
+    except Exception:
         pass
-    
-    # Try environment variable (for local development)
     env_key = os.getenv("GEMINI_API_KEY")
     if env_key:
         return env_key
-    
-    # Return None if not found (user will need to input)
     return None
 
 API_KEY = get_api_key()
@@ -68,200 +66,151 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — Neon Theme + Animations
+# CSS — Neon Theme + Beating Floating Expander (NEON)
 # -----------------------
 st.markdown("""
 <style>
-:root {
-  --bg:#020208;
-  --panel:#0a0f25;
+:root{
   --neonA:#00f5ff;
   --neonB:#ff40c4;
   --muted:#a4b1c9;
 }
-.stApp {
-  background: radial-gradient(circle at 20% 20%, #091133, #020208 90%);
-  color: #e6faff;
-  font-family: 'Plus Jakarta Sans', Inter, system-ui;
-}
+/* base app */
+.stApp { background: radial-gradient(circle at 20% 20%, #091133, #020208 90%); color:#e6faff; font-family: 'Plus Jakarta Sans', Inter, system-ui; }
 .header { text-align:center; margin-top:10px; margin-bottom:10px; }
-.header h1 {
-  font-size:42px; font-weight:900; letter-spacing:3px;
+.header h1 { font-size:42px; font-weight:900; letter-spacing:3px;
   background: linear-gradient(90deg, var(--neonA), var(--neonB));
   -webkit-background-clip:text; -webkit-text-fill-color:transparent;
   text-shadow: 0 0 20px rgba(0,245,255,0.8), 0 0 35px rgba(255,64,196,0.5);
 }
-.header h3 { color:var(--muted); font-weight:400; font-size:15px; text-shadow: 0 0 12px rgba(255,255,255,0.2); }
-.card {
-  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
-  border:1px solid rgba(255,255,255,0.05);
-  box-shadow: 0 0 25px rgba(0,245,255,0.05), 0 0 35px rgba(255,64,196,0.05);
-  border-radius:12px; padding:16px;
-}
+.header h3 { color:var(--muted); font-weight:400; font-size:15px; }
+/* card and metrics */
+.card { background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); border:1px solid rgba(255,255,255,0.05); border-radius:12px; padding:16px; }
 .metric-label { color:var(--muted); font-size:12px; }
 .large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.5); }
 
-/* Severity Bar */
-.sev-wrap { margin-top:16px; }
-.sev-outer { height:18px; width:100%; background: rgba(255,255,255,0.05); border-radius:14px; overflow:hidden; }
-.sev-inner {
-  height:100%; width:0%;
-  background: linear-gradient(90deg,var(--neonA),var(--neonB));
-  border-radius:14px;
-  box-shadow: 0 0 25px rgba(0,245,255,0.6), 0 0 25px rgba(255,64,196,0.5);
-  transition: width 1s ease-in-out;
-}
-.sev-chip {
-  margin-top:6px; display:inline-block;
-  padding:6px 12px; border-radius:12px;
-  font-weight:800; font-size:14px; color:#021617;
-  background: linear-gradient(90deg, rgba(0,245,255,0.9), rgba(255,64,196,0.9));
-  box-shadow: 0 0 20px rgba(0,245,255,0.4), 0 0 20px rgba(255,64,196,0.3);
-  animation: pulse 1.8s infinite;
-}
-@keyframes pulse { 0%{transform:scale(1);} 50%{transform:scale(1.06);} 100%{transform:scale(1);} }
-.download-btns { margin-top:14px; display:flex; gap:10px; justify-content:center; }
+/* severity */
+.sev-wrap{margin-top:16px;}
+.sev-outer{height:18px;width:100%;background:rgba(255,255,255,0.05);border-radius:14px;overflow:hidden;}
+.sev-inner{height:100%;width:0%;background:linear-gradient(90deg,var(--neonA),var(--neonB));border-radius:14px;transition:width 1s ease-in-out;}
+.sev-chip{margin-top:6px;display:inline-block;padding:6px 12px;border-radius:12px;font-weight:800;font-size:14px;color:#021617;background:linear-gradient(90deg, rgba(0,245,255,0.9), rgba(255,64,196,0.9));}
 
-/* Chat message styling */
-.user-msg {
-  background: linear-gradient(135deg, rgba(0,245,255,0.15), rgba(0,245,255,0.05));
-  border-left: 3px solid var(--neonA);
-  padding: 12px;
-  border-radius: 8px;
-  margin: 8px 0;
-}
-.assistant-msg {
-  background: linear-gradient(135deg, rgba(255,64,196,0.15), rgba(255,64,196,0.05));
-  border-left: 3px solid var(--neonB);
-  padding: 12px;
-  border-radius: 8px;
-  margin: 8px 0;
-}
-.chat-header {
-  text-align: center;
-  background: linear-gradient(90deg, var(--neonA), var(--neonB));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  font-weight: 800;
-  font-size: 24px;
-  margin-bottom: 20px;
-  text-shadow: 0 0 20px rgba(0,245,255,0.3);
-}
+/* chat messages */
+.user-msg{background: linear-gradient(135deg, rgba(0,245,255,0.15), rgba(0,245,255,0.05));padding:12px;border-radius:8px;margin:8px 0;border-left:3px solid var(--neonA);}
+.assistant-msg{background: linear-gradient(135deg, rgba(255,64,196,0.15), rgba(255,64,196,0.05));padding:12px;border-radius:8px;margin:8px 0;border-left:3px solid var(--neonB);}
 
-/* Floating Chat Expander at Bottom - NEON BEATING VERSION */
-.floating-expander {
+/* ----------------- FLOATING EXPANDER (NEON, BEATING) ----------------- */
+.floating-expander{
   position: fixed !important;
   bottom: 20px !important;
   right: 20px !important;
-  width: 450px !important;
-  max-width: 90vw !important;
+  width: 440px !important;
+  max-width: 92vw !important;
   z-index: 9999 !important;
-  animation: float 3s ease-in-out infinite !important;
-}
-
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-8px); }
-}
-
-/* Neon beating animation for expander */
-@keyframes neon-beat {
-  0%, 100% { 
-    box-shadow: 0 0 30px rgba(0,245,255,0.4), 0 0 50px rgba(255,64,196,0.3),
-                0 0 70px rgba(0,245,255,0.2), 0 0 90px rgba(255,64,196,0.2);
-    border-color: rgba(0,245,255,0.5);
-  }
-  50% { 
-    box-shadow: 0 0 50px rgba(0,245,255,0.8), 0 0 80px rgba(255,64,196,0.6),
-                0 0 110px rgba(0,245,255,0.4), 0 0 140px rgba(255,64,196,0.4);
-    border-color: rgba(255,64,196,0.8);
-  }
-}
-
-@keyframes neon-glow-text {
-  0%, 100% { 
-    text-shadow: 0 0 10px rgba(0,245,255,0.8), 0 0 20px rgba(255,64,196,0.6);
-  }
-  50% { 
-    text-shadow: 0 0 20px rgba(0,245,255,1), 0 0 30px rgba(255,64,196,0.9),
-                 0 0 40px rgba(0,245,255,0.7);
-  }
-}
-
-/* Style the expander with beating neon effect */
-.floating-expander details {
-  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
-  border: 2px solid rgba(0,245,255,0.5) !important;
   border-radius: 16px !important;
-  animation: neon-beat 2s ease-in-out infinite !important;
+  animation: float-slow 4s ease-in-out infinite;
 }
 
-.floating-expander details summary {
-  background: linear-gradient(135deg, rgba(0,245,255,0.25), rgba(255,64,196,0.25)) !important;
-  padding: 16px !important;
-  border-radius: 14px !important;
+/* slow float */
+@keyframes float-slow {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+  100% { transform: translateY(0px); }
+}
+
+/* neon beat for border/glow */
+@keyframes neon-beat {
+  0% {
+    box-shadow: 0 8px 30px rgba(0,245,255,0.08), 0 8px 40px rgba(255,64,196,0.06);
+    border-color: rgba(0,245,255,0.28);
+  }
+  50% {
+    box-shadow: 0 18px 60px rgba(0,245,255,0.18), 0 20px 80px rgba(255,64,196,0.12);
+    border-color: rgba(255,64,196,0.4);
+  }
+  100% {
+    box-shadow: 0 8px 30px rgba(0,245,255,0.08), 0 8px 40px rgba(255,64,196,0.06);
+    border-color: rgba(0,245,255,0.28);
+  }
+}
+
+/* container background and neon border */
+.floating-expander details{
+  background: linear-gradient(180deg, rgba(6,10,24,0.98), rgba(2,2,8,0.98)) !important;
+  border: 2px solid rgba(0,245,255,0.28) !important;
+  border-radius: 16px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  animation: neon-beat 2.2s ease-in-out infinite;
+}
+
+/* summary (the visible bar) - forced neon + white text and icon */
+.floating-expander details summary{
+  display:flex !important;
+  align-items:center !important;
+  gap:12px !important;
+  padding: 14px 16px !important;
+  margin: 10px !important;
+  border-radius: 12px !important;
   cursor: pointer !important;
-  font-weight: 800 !important;
-  font-size: 18px !important;
-  color: #e6faff !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-  animation: neon-glow-text 2s ease-in-out infinite !important;
-  transition: all 0.3s ease !important;
+  font-weight: 900 !important;
+  font-size: 17px !important;
+  color: #ffffff !important;          /* forced white label */
+  background: linear-gradient(90deg, rgba(0,245,255,0.12), rgba(255,64,196,0.12)) !important;
+  box-shadow: 0 8px 30px rgba(0,245,255,0.08), 0 6px 22px rgba(255,64,196,0.06);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
-.floating-expander details summary:hover {
-  background: linear-gradient(135deg, rgba(0,245,255,0.4), rgba(255,64,196,0.4)) !important;
-  box-shadow: 0 0 35px rgba(0,245,255,0.7), 0 0 50px rgba(255,64,196,0.6) !important;
-  transform: scale(1.02) !important;
-}
-
-.floating-expander details[open] {
-  animation: neon-beat 1.5s ease-in-out infinite !important;
-  box-shadow: 0 0 60px rgba(0,245,255,0.8), 0 0 90px rgba(255,64,196,0.6) !important;
-}
-
-.floating-expander details[open] summary {
-  background: linear-gradient(135deg, rgba(0,245,255,0.35), rgba(255,64,196,0.35)) !important;
-  border-bottom: 2px solid rgba(0,245,255,0.4) !important;
-  margin-bottom: 12px !important;
-}
-
-/* Pulsing icon animation with neon glow */
-@keyframes pulse-icon {
-  0%, 100% { 
-    transform: scale(1); 
-    filter: drop-shadow(0 0 8px rgba(0,245,255,0.8)) drop-shadow(0 0 15px rgba(255,64,196,0.6));
-  }
-  50% { 
-    transform: scale(1.2); 
-    filter: drop-shadow(0 0 15px rgba(0,245,255,1)) drop-shadow(0 0 25px rgba(255,64,196,0.9));
-  }
-}
-
-.floating-expander details summary::before {
+/* add a neon icon to the left */
+.floating-expander details summary::before{
   content: "💬";
-  font-size: 26px;
-  display: inline-block;
-  animation: pulse-icon 1.5s ease-in-out infinite;
-  margin-right: 8px;
+  display:inline-block;
+  font-size:22px;
+  margin-right:6px;
+  filter: drop-shadow(0 0 8px rgba(0,245,255,0.9)) drop-shadow(0 0 12px rgba(255,64,196,0.7));
+  transform-origin:center;
+  animation: icon-beat 1.6s ease-in-out infinite;
 }
 
-footer { visibility:hidden; }
+/* icon beat */
+@keyframes icon-beat{
+  0% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+
+/* hover & open states */
+.floating-expander details summary:hover{
+  transform: translateY(-4px) scale(1.02) !important;
+  box-shadow: 0 16px 50px rgba(0,245,255,0.14), 0 12px 40px rgba(255,64,196,0.08) !important;
+}
+
+.floating-expander details[open] summary{
+  box-shadow: 0 22px 80px rgba(0,245,255,0.18), 0 18px 60px rgba(255,64,196,0.12) !important;
+}
+
+/* responsive */
+@media (max-width: 480px) {
+  .floating-expander { right: 12px !important; bottom: 12px !important; width: 92vw !important; }
+  .floating-expander details summary { font-size: 15px !important; padding: 12px 14px !important; margin: 8px !important; }
+}
+
+/* hide Streamlit footer */
+footer { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
+
+# If you prefer a different Gemini model, change MODEL_NAME
 MODEL_NAME = "models/gemini-2.5-pro"
+
 # -----------------------
 # Chatbot Function
 # -----------------------
 def ask_glaucoma_assistant(question, history, api_key):
     """Call Google Gemini API with glaucoma-specific context"""
-    
     if not api_key or not api_key.strip():
         return "⚠️ Please configure your Google Gemini API key (see sidebar)."
-    
-    # System prompt
+
     system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
 
 Your role:
@@ -276,31 +225,22 @@ Important: Always remind users to consult healthcare professionals for medical d
 
     try:
         if USE_SDK:
-            # Use official Google AI SDK
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel(MODEL_NAME)
-            
-            # Build conversation
             chat_history = []
             for msg in history[-6:]:
                 role = "user" if msg["role"] == "user" else "model"
                 chat_history.append({"role": role, "parts": [msg["content"]]})
-            
             chat = model.start_chat(history=chat_history)
             response = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
             return response.text
-            
         else:
-            # Fallback to REST API
             conversation_context = ""
             for msg in history[-6:]:
                 role = "User" if msg["role"] == "user" else "Assistant"
                 conversation_context += f"{role}: {msg['content']}\n\n"
-            
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
-            
             url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
-            
             response = requests.post(
                 url,
                 headers={"Content-Type": "application/json"},
@@ -310,7 +250,6 @@ Important: Always remind users to consult healthcare professionals for medical d
                 },
                 timeout=30
             )
-            
             if response.status_code == 200:
                 data = response.json()
                 return data["candidates"][0]["content"]["parts"][0]["text"]
@@ -320,7 +259,6 @@ Important: Always remind users to consult healthcare professionals for medical d
                 return "❌ API not accessible. Your key might be restricted. Try creating a new unrestricted key."
             else:
                 return f"❌ Error ({response.status_code}): {response.text[:200]}"
-                
     except Exception as e:
         return f"❌ Error: {str(e)}\n\nTip: Make sure your API key from https://aistudio.google.com/apikey is unrestricted."
 
@@ -450,50 +388,42 @@ def render_severity(pct):
 # -----------------------
 with st.sidebar:
     st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
-    
     if API_KEY:
         st.success("✅ Gemini API Key configured")
         st.info("Using API key from secrets/environment")
     else:
         st.error("❌ No API Key found")
         st.warning("Chatbot will not work without an API key")
-    
     st.markdown("---")
     st.markdown("""
     <div style='font-size:12px; color:var(--muted);'>
     <strong>How to configure Gemini API key:</strong><br><br>
-    
     <strong>For Streamlit Cloud:</strong><br>
     1. Go to your app settings<br>
     2. Add to Secrets:<br>
     <code>GEMINI_API_KEY = "your-key-here"</code><br><br>
-    
     <strong>For Local Development:</strong><br>
     1. Create <code>.streamlit/secrets.toml</code><br>
     2. Add: <code>GEMINI_API_KEY = "your-key-here"</code><br>
     3. Or set environment variable:<br>
     <code>export GEMINI_API_KEY="your-key-here"</code><br><br>
-    
     <strong>Get FREE API key:</strong><br>
     1. Visit <a href='https://aistudio.google.com/apikey' target='_blank'>Google AI Studio</a><br>
     2. Click "Get API Key"<br>
     3. Copy your key<br><br>
-    
     <strong>✨ Gemini is FREE with generous limits!</strong>
     </div>
     """, unsafe_allow_html=True)
 
 # -----------------------
-# LAYOUT
+# UI LAYOUT (RNFLT / B-Scan upload)
 # -----------------------
 colA, colB = st.columns(2)
-
 with colA:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("🩺 RNFLT Map Analysis (.npz)")
     rnflt_file = st.file_uploader("Upload RNFLT file", type=["npz"])
     st.markdown("</div>", unsafe_allow_html=True)
-
 with colB:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("👁️ B-Scan Slice Analysis (Image)")
@@ -525,7 +455,6 @@ if rnflt_file or bscan_file:
             m2.markdown(f"<div class='metric-label'>Mean RNFLT</div><div class='large-metric'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
             m3.markdown(f"<div class='metric-label'>Std Dev</div><div class='large-metric'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
             m4.markdown(f"<div class='metric-label'>Cluster</div><div class='large-metric'>{cluster}</div>", unsafe_allow_html=True)
-
             st.markdown(render_severity(sev), unsafe_allow_html=True)
             fig, axes = plt.subplots(1,3,figsize=(18,6),constrained_layout=True)
             im0=axes[0].imshow(rnflt,cmap='turbo');axes[0].axis('off');axes[0].set_title("Uploaded RNFLT")
@@ -546,13 +475,11 @@ if rnflt_file or bscan_file:
         label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
         conf = pred_raw*100 if label_b=="Glaucoma-like" else (1-pred_raw)*100
         severity_overall = max(severity_overall, conf)
-
         st.markdown("<hr>", unsafe_allow_html=True)
         m1, m2 = st.columns(2)
         m1.markdown(f"<div class='metric-label'>CNN Prediction</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
         m2.markdown(f"<div class='metric-label'>Confidence</div><div class='large-metric'>{conf:.2f}%</div>", unsafe_allow_html=True)
         st.markdown(render_severity(conf), unsafe_allow_html=True)
-
         heat = gradcam(batch, b_model)
         if heat is not None:
             heat_r = cv2.resize(heat, (224,224))
@@ -580,41 +507,42 @@ st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING CHAT EXPANDER (Bottom-right corner) - WITH NEON BEATING EFFECT
+# FLOATING CHAT EXPANDER — label changed to "💬 Ask AI assistant" (NEON)
 # -----------------------
 st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
-with st.expander("Ask Glaucoma Assistant", expanded=False):
+with st.expander("💬 Ask AI assistant", expanded=False):
     st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:15px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
-    
+    st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:12px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
+
     # Display chat history
     for msg in st.session_state.chat_history:
         if msg["role"] == "user":
             st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
         else:
             st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-    
+
     # Input area
-    user_question = st.text_input("Your question:", key="chat_input", placeholder="e.g., What is glaucoma? How does OCT detect it?", label_visibility="collapsed")
-    
+    user_question = st.text_input("Your question:", key="chat_input", placeholder="e.g., What is glaucoma? How does OCT detect it?", label_visibility="collapsed", help="Type your glaucoma or OCT question here")
+
     col1, col2 = st.columns([4, 1])
     with col1:
         send_btn = st.button("📤 Send", use_container_width=True)
     with col2:
         clear_btn = st.button("🗑️", use_container_width=True)
-    
+
     if send_btn and user_question:
         if not API_KEY:
             st.error("❌ API key not configured. See sidebar.")
         else:
             with st.spinner("🔍 Searching for answers..."):
                 response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
+                # append to history and rerun to show reply
                 st.session_state.chat_history.append({"role": "user", "content": user_question})
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
-                st.rerun()
-    
+                st.experimental_rerun()
+
     if clear_btn:
         st.session_state.chat_history = []
-        st.rerun()
+        st.experimental_rerun()
 
 st.markdown('</div>', unsafe_allow_html=True)
