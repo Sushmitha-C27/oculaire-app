@@ -576,41 +576,176 @@ st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING CHAT EXPANDER (Bottom-right corner)
+# FLOATING CHAT WIDGET (Bottom-right corner)
 # -----------------------
-st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
-with st.expander("💬 Ask Glaucoma Assistant", expanded=False):
-    st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:15px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
-    
-    # Display chat history
-    for msg in st.session_state.chat_history:
-        if msg["role"] == "user":
-            st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
-    
-    # Input area
-    user_question = st.text_input("Your question:", key="chat_input", placeholder="e.g., What is glaucoma? How does OCT detect it?", label_visibility="collapsed")
-    
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        send_btn = st.button("📤 Send", use_container_width=True)
-    with col2:
-        clear_btn = st.button("🗑️", use_container_width=True)
-    
-    if send_btn and user_question:
-        if not API_KEY:
-            st.error("❌ API key not configured. See sidebar.")
-        else:
-            with st.spinner("🔍 Searching for answers..."):
-                response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
-                st.session_state.chat_history.append({"role": "user", "content": user_question})
-                st.session_state.chat_history.append({"role": "assistant", "content": response})
-                st.rerun()
-    
-    if clear_btn:
-        st.session_state.chat_history = []
-        st.rerun()
+# Create a floating button that opens chat in sidebar
+st.markdown("""
+<div class="floating-chat-bubble" id="chatBubble">
+    <span class="robot-icon">🤖</span>
+    <span class="chat-text">Ask Assistant</span>
+</div>
 
-st.markdown('</div>', unsafe_allow_html=True)
+<style>
+.floating-chat-bubble {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: auto;
+    min-width: 180px;
+    padding: 18px 28px;
+    background: linear-gradient(135deg, rgba(0,245,255,0.25), rgba(255,64,196,0.25));
+    border: 2px solid transparent;
+    border-radius: 50px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    z-index: 9999;
+    font-weight: 800;
+    font-size: 17px;
+    color: #e6faff;
+    backdrop-filter: blur(20px);
+    box-shadow: 
+        0 0 40px rgba(0,245,255,0.4),
+        0 0 60px rgba(255,64,196,0.3),
+        0 10px 40px rgba(0,0,0,0.5);
+    animation: gentleFloat 4s ease-in-out infinite, borderGlow 3s ease-in-out infinite;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.floating-chat-bubble::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    background: linear-gradient(135deg, #00f5ff, #ff40c4, #00f5ff);
+    border-radius: 50px;
+    z-index: -1;
+    animation: borderRotate 3s linear infinite;
+    background-size: 200% 200%;
+}
+
+.robot-icon {
+    font-size: 38px;
+    animation: robotPulse 2s ease-in-out infinite;
+    filter: drop-shadow(0 0 10px rgba(0,245,255,0.8));
+}
+
+.chat-text {
+    font-weight: 900;
+    letter-spacing: 0.5px;
+    text-shadow: 0 0 10px rgba(0,245,255,0.5);
+}
+
+.floating-chat-bubble:hover {
+    transform: translateY(-5px) scale(1.05);
+    background: linear-gradient(135deg, rgba(0,245,255,0.35), rgba(255,64,196,0.35));
+    box-shadow: 
+        0 0 50px rgba(0,245,255,0.6),
+        0 0 80px rgba(255,64,196,0.5),
+        0 15px 50px rgba(0,0,0,0.6);
+}
+
+@keyframes gentleFloat {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-12px); }
+}
+
+@keyframes robotPulse {
+    0%, 100% { 
+        transform: scale(1);
+        filter: drop-shadow(0 0 10px rgba(0,245,255,0.8));
+    }
+    50% { 
+        transform: scale(1.15);
+        filter: drop-shadow(0 0 20px rgba(255,64,196,1));
+    }
+}
+
+@keyframes borderRotate {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+@keyframes borderGlow {
+    0%, 100% { 
+        box-shadow: 
+            0 0 40px rgba(0,245,255,0.4),
+            0 0 60px rgba(255,64,196,0.3),
+            0 10px 40px rgba(0,0,0,0.5);
+    }
+    50% { 
+        box-shadow: 
+            0 0 60px rgba(0,245,255,0.7),
+            0 0 90px rgba(255,64,196,0.6),
+            0 10px 40px rgba(0,0,0,0.5);
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+# When chat is open, show in sidebar
+if st.session_state.chat_open:
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("<div class='chat-header'>🤖 Glaucoma Assistant</div>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:15px;'>Ask me anything about glaucoma!</p>", unsafe_allow_html=True)
+        
+        # Display chat history
+        for msg in st.session_state.chat_history:
+            if msg["role"] == "user":
+                st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+        
+        # Input area
+        user_question = st.text_input("Your question:", key="chat_input", placeholder="What is glaucoma?")
+        
+        col1, col2, col3 = st.columns([3, 1, 1])
+        with col1:
+            if st.button("📤 Send", use_container_width=True):
+                if user_question and API_KEY:
+                    with st.spinner("🔍 Thinking..."):
+                        response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
+                        st.session_state.chat_history.append({"role": "user", "content": user_question})
+                        st.session_state.chat_history.append({"role": "assistant", "content": response})
+                        st.rerun()
+                elif not API_KEY:
+                    st.error("❌ No API key")
+        with col2:
+            if st.button("🗑️", use_container_width=True):
+                st.session_state.chat_history = []
+                st.rerun()
+        with col3:
+            if st.button("✖️", use_container_width=True):
+                st.session_state.chat_open = False
+                st.rerun()
+
+# Toggle button (invisible, just for state management)
+if st.button("Toggle Chat", key="toggle_chat_hidden", type="secondary"):
+    st.session_state.chat_open = not st.session_state.chat_open
+    st.rerun()
+
+# JavaScript to make the bubble clickable
+st.markdown("""
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const bubble = document.getElementById('chatBubble');
+    if (bubble) {
+        bubble.addEventListener('click', function() {
+            // Find and click the Streamlit button
+            const buttons = window.parent.document.querySelectorAll('button');
+            buttons.forEach(btn => {
+                if (btn.textContent.includes('Toggle Chat')) {
+                    btn.click();
+                }
+            });
+        });
+    }
+});
+</script>
+""", unsafe_allow_html=True)
