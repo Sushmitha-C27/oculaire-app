@@ -1,5 +1,4 @@
-# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot (floating pill + overlay chat)
-# Save/replace your current app.py with this file.
+# app.py — OCULAIRE Neon Lab v5 with final floating pill + overlay chat (white label)
 # Run: streamlit run app.py
 
 import streamlit as st
@@ -523,120 +522,202 @@ if rnflt_file or bscan_file:
 st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
-# -----------------------
-# FLOATING PILL + CHAT OVERLAY (query-param driven)
-# - click pill -> sets open_chat=1 and reloads
-# - app reads open_chat and renders overlay (Streamlit native UI) when true
-# - closing/clearing will remove query params (st.experimental_set_query_params())
-# -----------------------
+# ==========================================================
+# FINAL FLOATING PILL + WHITE LABEL + OVERLAY CHAT WIDGET
+# Replace any previous floating-chat/expander code with this
+# ==========================================================
 
-# Read query params to know whether to show overlay
+# Read query param to decide whether chat overlay is open
 query_params = st.experimental_get_query_params()
-open_chat = False
-if "open_chat" in query_params and query_params.get("open_chat", ["0"])[0].lower() in ("1", "true", "yes"):
-    open_chat = True
+open_chat = query_params.get("open_chat", ["0"])[0] in ["1", "true", "True"]
 
-# Render the floating pill (clicking it will set open_chat=1 in URL and reload)
+# -------------------------------------------------------------------
+# 1) Floating pill (with **white label text**) — always visible
+# -------------------------------------------------------------------
 pill_html = """
-<div class="floating-bubble">
-  <div class="bubble-pill" onclick="
-    (function(){
-      try {
-        const url = new URL(window.location.href);
-        url.searchParams.set('open_chat', '1');
-        window.location.href = url.toString();
-      } catch(e) {
-        window.location.search = '?open_chat=1';
-      }
-    })();
-  ">
-    <div style='font-size:18px;'>💬</div>
-    <div style='font-size:14px; color:#021617;'>Ask OCULAIRE</div>
+<div style="position:fixed; bottom:24px; right:24px; z-index:99999;">
+
+  <div onclick="
+      (function(){
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set('open_chat', '1');
+          window.location.href = url.toString();
+        } catch(e){
+          window.location.search='?open_chat=1';
+        }
+      })();
+    "
+    style="
+      display:flex;
+      align-items:center;
+      gap:12px;
+      padding:12px 20px;
+      border-radius:999px;
+      cursor:pointer;
+      background:linear-gradient(90deg,#00f5ff,#ff40c4);
+      box-shadow:0 0 30px rgba(0,245,255,0.5), 0 0 40px rgba(255,64,196,0.5);
+      transition:0.15s ease;
+    "
+  >
+
+    <!-- Icon container -->
+    <div style="
+        width:38px;
+        height:38px;
+        border-radius:50%;
+        background:white;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        box-shadow:0 4px 20px rgba(0,0,0,0.4);
+        font-size:19px;
+    ">💬</div>
+
+    <!-- LABEL (FORCED WHITE TEXT) -->
+    <div style="
+        font-size:16px;
+        font-weight:800;
+        color:white !important;
+        text-shadow:0 0 6px rgba(0,0,0,0.6);
+    ">Ask OCULAIRE</div>
+
   </div>
+
 </div>
 """
-components.html(pill_html, height=120)
 
-# If open_chat flag present, render a fixed-position Streamlit overlay that behaves like a widget
+components.html(pill_html, height=130)
+
+# -------------------------------------------------------------------
+# 2) Chat Overlay (only visible when open_chat == True)
+# -------------------------------------------------------------------
 if open_chat:
-    # Overlay container (native Streamlit controls positioned fixed via HTML wrapper)
-    # We render the HTML shell first (header area with close button), then show Streamlit widgets below.
-    overlay_shell = """
-    <div class="chat-overlay" id="oculaire_chat_overlay">
-      <div class="header" style="padding:12px 14px;">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <div style="font-size:18px;">🤖</div>
-          <div style="font-weight:800; color:#e6faff; font-size:16px;">Glaucoma Assistant</div>
-        </div>
-        <div>
-          <!-- Close handled by Streamlit button below (we keep this as visual) -->
-        </div>
+
+    # Overlay HTML shell (background + header only)
+    overlay_html = """
+    <div style="
+        position:fixed;
+        bottom:100px;
+        right:24px;
+        width:420px;
+        max-width:92vw;
+        z-index:100000;
+        border-radius:16px;
+        overflow:hidden;
+        background:linear-gradient(180deg,rgba(10,15,37,0.98),rgba(2,2,8,0.98));
+        border:1px solid rgba(255,255,255,0.08);
+        box-shadow:0 20px 60px rgba(0,0,0,0.6);
+    ">
+
+      <div style="
+          padding:14px 18px;
+          display:flex; 
+          justify-content:space-between;
+          align-items:center;
+          background:rgba(255,255,255,0.03);
+      ">
+          <div style="font-size:18px; font-weight:800; color:white;">
+              🤖 OCULAIRE Assistant
+          </div>
+
+          <button onclick="
+              (function(){
+                try {
+                  const url = new URL(window.location.href);
+                  url.searchParams.delete('open_chat');
+                  window.location.href = url.toString();
+                } catch(e){
+                  window.location.search='';
+                }
+              })();
+          "
+          style="
+              background:none;
+              color:white;
+              border:none;
+              font-size:20px;
+              cursor:pointer;
+          ">✖</button>
       </div>
-      <div class="body" id="oculaire_chat_body">
-      <!-- Streamlit will render chat history and inputs here -->
-      </div>
+
     </div>
     """
-    components.html(overlay_shell, height=10)  # minimal height; the actual Streamlit elements are placed below
+    components.html(overlay_html, height=0)
 
-    # Use a fixed container area for chat content using HTML wrapper and streamlit elements
-    # Place Streamlit-native elements that visually align with the overlay by using st.markdown with raw HTML + container
-    chat_container_html = """
-    <div style="position:fixed; bottom:100px; right:24px; width:420px; max-width:92vw; z-index:10001;">
-      <div style="padding:0;">
-    """
-    st.markdown(chat_container_html, unsafe_allow_html=True)
+    # Container for Streamlit widgets inside overlay
+    st.markdown("""
+    <div style="
+        position:fixed;
+        bottom:115px;
+        right:40px;
+        width:380px;
+        max-width:90vw;
+        z-index:100001;
+        padding:10px;
+        background:rgba(10,10,20,0.7);
+        backdrop-filter:blur(10px);
+        border-radius:12px;
+    ">
+    """, unsafe_allow_html=True)
 
-    # Chat header row with close button (Streamlit button used to clear query params)
-    cols = st.columns([8,1])
-    with cols[0]:
-        st.markdown("<div style='padding:10px 8px; font-weight:800; color:#e6faff; font-size:16px;'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
-    with cols[1]:
-        # Close overlay: clear query params and rerun
-        if st.button("✖", key="close_chat_overlay"):
-            st.experimental_set_query_params()  # clear
-            st.experimental_rerun()
-
-    # Display chat history inside overlay body
-    st.markdown("<div style='max-height:300px; overflow:auto; padding:6px;'>", unsafe_allow_html=True)
+    # ---- Chat messages ----
+    st.markdown("<div style='max-height:250px; overflow-y:auto; padding-right:6px;'>",
+                unsafe_allow_html=True)
     for msg in st.session_state.chat_history:
         if msg["role"] == "user":
-            st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+            st.markdown(f"""
+            <div style="
+                background:rgba(0,245,255,0.15);
+                padding:10px;
+                border-left:3px solid #00f5ff;
+                border-radius:8px;
+                margin:6px 0;
+                color:white;
+            ">
+                <strong>You:</strong> {msg['content']}
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+            st.markdown(f"""
+            <div style="
+                background:rgba(255,64,196,0.15);
+                padding:10px;
+                border-left:3px solid #ff40c4;
+                border-radius:8px;
+                margin:6px 0;
+                color:white;
+            ">
+                <strong>OCULAIRE:</strong> {msg['content']}
+            </div>
+            """, unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Input area and buttons inside overlay footer
-    user_q = st.text_input("", key="floating_chat_input", placeholder="e.g., What is glaucoma? How does OCT detect it?")
-    col_input_left, col_input_right = st.columns([4,1])
-    with col_input_left:
-        send_btn = st.button("📤 Send", key="floating_send")
-    with col_input_right:
-        clear_btn = st.button("🗑️", key="floating_clear")
+    # ---- Input + buttons ----
+    user_text = st.text_input("Ask something about glaucoma:", key="popup_input")
 
-    if send_btn and user_q:
-        if not API_KEY:
-            # Add error message in chat history (so user sees it)
-            st.session_state.chat_history.append({"role":"assistant", "content":"❌ API key not configured. See sidebar to add GEMINI_API_KEY."})
-            # Keep overlay open by maintaining query param
-            st.experimental_set_query_params(open_chat="1")
-            st.experimental_rerun()
+    colA, colB = st.columns([4,1])
+    with colA:
+        send = st.button("Send")
+    with colB:
+        clear = st.button("🗑️")
+
+    if send and user_text:
+        if API_KEY:
+            reply = ask_glaucoma_assistant(user_text, st.session_state.chat_history, API_KEY)
+            st.session_state.chat_history.append({"role":"user","content":user_text})
+            st.session_state.chat_history.append({"role":"assistant","content":reply})
         else:
-            with st.spinner("🔍 Searching for answers..."):
-                response_text = ask_glaucoma_assistant(user_q, st.session_state.chat_history, API_KEY)
-                st.session_state.chat_history.append({"role":"user", "content": user_q})
-                st.session_state.chat_history.append({"role":"assistant", "content": response_text})
-                # After sending, keep overlay open for follow-ups
-                st.experimental_set_query_params(open_chat="1")
-                st.experimental_rerun()
+            st.session_state.chat_history.append({"role":"assistant","content":"❌ No API key. Add GEMINI_API_KEY in secrets."})
 
-    if clear_btn:
-        st.session_state.chat_history = []
-        # Clear query params and rerun to collapse overlay
-        st.experimental_set_query_params()
+        st.experimental_set_query_params(open_chat="1")
         st.experimental_rerun()
 
-    # close the chat container wrapper
-    st.markdown("</div></div>", unsafe_allow_html=True)
+    if clear:
+        st.session_state.chat_history = []
+        st.experimental_set_query_params(open_chat="1")
+        st.experimental_rerun()
 
-# End of app.py
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# End of file
