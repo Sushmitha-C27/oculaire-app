@@ -1,4 +1,4 @@
-# app.py — OCULAIRE Neon Lab v5 with Glaucoma Chatbot
+# app.py — OCULAIRE Neon Lab v5 (final fixed)
 import streamlit as st
 import numpy as np
 import joblib
@@ -14,7 +14,7 @@ import os
 try:
     import google.generativeai as genai
     USE_SDK = True
-except ImportError:
+except Exception:
     import requests
     import json
     USE_SDK = False
@@ -32,11 +32,13 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
-# Optional: keep last processed question to avoid duplicates if you use URL-nav elsewhere
+# optional guard to avoid double-processing if using URL-nav approach elsewhere
 if 'last_processed_q' not in st.session_state:
     st.session_state['last_processed_q'] = None
 
+# -----------------------
 # Get API key from Streamlit secrets or environment variable
+# -----------------------
 def get_api_key():
     try:
         return st.secrets["GEMINI_API_KEY"]
@@ -66,7 +68,7 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — Neon Theme + Beating Floating Expander (NEON)
+# CSS — Neon Theme + Beating Floating Expander (RELIABLE SELECTORS)
 # -----------------------
 st.markdown("""
 <style>
@@ -75,7 +77,8 @@ st.markdown("""
   --neonB:#ff40c4;
   --muted:#a4b1c9;
 }
-/* base app */
+
+/* general app */
 .stApp { background: radial-gradient(circle at 20% 20%, #091133, #020208 90%); color:#e6faff; font-family: 'Plus Jakarta Sans', Inter, system-ui; }
 .header { text-align:center; margin-top:10px; margin-bottom:10px; }
 .header h1 { font-size:42px; font-weight:900; letter-spacing:3px;
@@ -84,7 +87,8 @@ st.markdown("""
   text-shadow: 0 0 20px rgba(0,245,255,0.8), 0 0 35px rgba(255,64,196,0.5);
 }
 .header h3 { color:var(--muted); font-weight:400; font-size:15px; }
-/* card and metrics */
+
+/* card */
 .card { background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); border:1px solid rgba(255,255,255,0.05); border-radius:12px; padding:16px; }
 .metric-label { color:var(--muted); font-size:12px; }
 .large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.5); }
@@ -93,9 +97,9 @@ st.markdown("""
 .sev-wrap{margin-top:16px;}
 .sev-outer{height:18px;width:100%;background:rgba(255,255,255,0.05);border-radius:14px;overflow:hidden;}
 .sev-inner{height:100%;width:0%;background:linear-gradient(90deg,var(--neonA),var(--neonB));border-radius:14px;transition:width 1s ease-in-out;}
-.sev-chip{margin-top:6px;display:inline-block;padding:6px 12px;border-radius:12px;font-weight:800;font-size:14px;color:#021617;background:linear-gradient(90deg, rgba(0,245,255,0.9), rgba(255,64,196,0.9));}
+.sev-chip{margin-top:6px;display:inline-block;padding:6px 12px;border-radius:12px;font-weight:800;font-size:14px;color:#021617;background:linear-gradient(90deg, rgba(0,245,255,0.95), rgba(255,64,196,0.95));}
 
-/* chat messages */
+/* chat */
 .user-msg{background: linear-gradient(135deg, rgba(0,245,255,0.15), rgba(0,245,255,0.05));padding:12px;border-radius:8px;margin:8px 0;border-left:3px solid var(--neonA);}
 .assistant-msg{background: linear-gradient(135deg, rgba(255,64,196,0.15), rgba(255,64,196,0.05));padding:12px;border-radius:8px;margin:8px 0;border-left:3px solid var(--neonB);}
 
@@ -106,46 +110,23 @@ st.markdown("""
   right: 20px !important;
   width: 440px !important;
   max-width: 92vw !important;
-  z-index: 9999 !important;
+  z-index: 99999 !important;
   border-radius: 16px !important;
-  animation: float-slow 4s ease-in-out infinite;
+  animation: float-slow 3.6s ease-in-out infinite;
 }
 
-/* slow float */
-@keyframes float-slow {
-  0% { transform: translateY(0px); }
-  50% { transform: translateY(-6px); }
-  100% { transform: translateY(0px); }
-}
-
-/* neon beat for border/glow */
-@keyframes neon-beat {
-  0% {
-    box-shadow: 0 8px 30px rgba(0,245,255,0.08), 0 8px 40px rgba(255,64,196,0.06);
-    border-color: rgba(0,245,255,0.28);
-  }
-  50% {
-    box-shadow: 0 18px 60px rgba(0,245,255,0.18), 0 20px 80px rgba(255,64,196,0.12);
-    border-color: rgba(255,64,196,0.4);
-  }
-  100% {
-    box-shadow: 0 8px 30px rgba(0,245,255,0.08), 0 8px 40px rgba(255,64,196,0.06);
-    border-color: rgba(0,245,255,0.28);
-  }
-}
-
-/* container background and neon border */
-.floating-expander details{
-  background: linear-gradient(180deg, rgba(6,10,24,0.98), rgba(2,2,8,0.98)) !important;
-  border: 2px solid rgba(0,245,255,0.28) !important;
+/* wrapper path targeting the actual details rendered by Streamlit reliably */
+.floating-expander > div > details {
+  background: linear-gradient(180deg, rgba(6,10,24,0.96), rgba(2,2,8,0.96)) !important;
+  border: 2px solid rgba(0,245,255,0.55) !important;
   border-radius: 16px !important;
-  padding: 0 !important;
   overflow: hidden !important;
-  animation: neon-beat 2.2s ease-in-out infinite;
+  padding: 0 !important;
+  animation: neon-beat 2.1s ease-in-out infinite;
 }
 
-/* summary (the visible bar) - forced neon + white text and icon */
-.floating-expander details summary{
+/* Summary bar — neon, forced white text */
+.floating-expander > div > details > summary {
   display:flex !important;
   align-items:center !important;
   gap:12px !important;
@@ -155,52 +136,50 @@ st.markdown("""
   cursor: pointer !important;
   font-weight: 900 !important;
   font-size: 17px !important;
-  color: #ffffff !important;          /* forced white label */
-  background: linear-gradient(90deg, rgba(0,245,255,0.12), rgba(255,64,196,0.12)) !important;
-  box-shadow: 0 8px 30px rgba(0,245,255,0.08), 0 6px 22px rgba(255,64,196,0.06);
+  color: #ffffff !important;
+  background: linear-gradient(90deg, rgba(0,245,255,0.95), rgba(0,200,255,0.95), rgba(255,64,196,0.95)) !important;
+  text-shadow: 0 0 12px rgba(0,0,0,0.7);
+  box-shadow: 0 10px 40px rgba(0,245,255,0.45), 0 10px 45px rgba(255,64,196,0.35);
   transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
 
-/* add a neon icon to the left */
-.floating-expander details summary::before{
+/* add a pulsing icon */
+.floating-expander > div > details > summary::before {
   content: "💬";
-  display:inline-block;
-  font-size:22px;
-  margin-right:6px;
-  filter: drop-shadow(0 0 8px rgba(0,245,255,0.9)) drop-shadow(0 0 12px rgba(255,64,196,0.7));
-  transform-origin:center;
+  font-size: 22px;
+  margin-right: 6px;
   animation: icon-beat 1.6s ease-in-out infinite;
 }
 
-/* icon beat */
-@keyframes icon-beat{
-  0% { transform: scale(1); }
-  50% { transform: scale(1.18); }
-  100% { transform: scale(1); }
-}
-
-/* hover & open states */
-.floating-expander details summary:hover{
+/* hover & open */
+.floating-expander > div > details > summary:hover {
   transform: translateY(-4px) scale(1.02) !important;
-  box-shadow: 0 16px 50px rgba(0,245,255,0.14), 0 12px 40px rgba(255,64,196,0.08) !important;
+  box-shadow: 0 16px 60px rgba(0,245,255,0.6), 0 12px 45px rgba(255,64,196,0.5) !important;
 }
 
-.floating-expander details[open] summary{
-  box-shadow: 0 22px 80px rgba(0,245,255,0.18), 0 18px 60px rgba(255,64,196,0.12) !important;
+.floating-expander > div > details[open] > summary {
+  box-shadow: 0 26px 90px rgba(0,245,255,0.8), 0 20px 70px rgba(255,64,196,0.6) !important;
 }
+
+/* Animations */
+@keyframes float-slow { 0% { transform: translateY(0px); } 50% { transform: translateY(-6px); } 100% { transform: translateY(0px); } }
+@keyframes neon-beat { 0%,100% { box-shadow: 0 0 25px rgba(0,245,255,0.4), 0 0 35px rgba(255,64,196,0.35); } 50% { box-shadow: 0 0 55px rgba(0,245,255,0.9), 0 0 75px rgba(255,64,196,0.85); } }
+@keyframes icon-beat { 0% { transform: scale(1); } 50% { transform: scale(1.18); } 100% { transform: scale(1); } }
 
 /* responsive */
 @media (max-width: 480px) {
   .floating-expander { right: 12px !important; bottom: 12px !important; width: 92vw !important; }
-  .floating-expander details summary { font-size: 15px !important; padding: 12px 14px !important; margin: 8px !important; }
+  .floating-expander > div > details > summary { font-size: 15px !important; padding: 12px 14px !important; margin: 8px !important; }
 }
 
-/* hide Streamlit footer */
+/* hide streamlit footer (optional) */
 footer { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
-# If you prefer a different Gemini model, change MODEL_NAME
+# -----------------------
+# Model name (if you want to change)
+# -----------------------
 MODEL_NAME = "models/gemini-2.5-pro"
 
 # -----------------------
@@ -295,7 +274,7 @@ def load_models():
 b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models()
 
 # -----------------------
-# Helpers
+# Helpers (process, gradcam, render)
 # -----------------------
 def process_npz(f):
     try:
@@ -536,13 +515,13 @@ with st.expander("💬 Ask AI assistant", expanded=False):
         else:
             with st.spinner("🔍 Searching for answers..."):
                 response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
-                # append to history and rerun to show reply
                 st.session_state.chat_history.append({"role": "user", "content": user_question})
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
-                st.experimental_rerun()
+                # rerun replaced (streamlit removed experimental API)
+                st.rerun()
 
     if clear_btn:
         st.session_state.chat_history = []
-        st.experimental_rerun()
+        st.rerun()
 
 st.markdown('</div>', unsafe_allow_html=True)
