@@ -1,21 +1,20 @@
-# app.py — OCULAIRE Neon Lab v6 (single-file)
+# app.py — OCULAIRE Neon Lab v6 (updated, model-fallbacks + robust chat)
 # Run: streamlit run app.py
 
 import os
 import io
-import time
 import json
+import time
 import requests
 import numpy as np
 import streamlit as st
-import streamlit.components.v1 as components
 import joblib
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from PIL import Image
 import cv2
 
-# Try to import google.generativeai (optional). If present we use SDK style; otherwise use REST.
+# Optional SDK import
 try:
     import google.generativeai as genai
     USE_SDK = True
@@ -31,25 +30,23 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    initial_sidebar_state="expanded")
 
 # -----------------------
-# Session-state init
+# Session state init
 # -----------------------
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "last_raw_reply" not in st.session_state:
     st.session_state.last_raw_reply = None
-if "ui_tick" not in st.session_state:
-    st.session_state.ui_tick = 0
+if "last_success_model" not in st.session_state:
+    st.session_state.last_success_model = None
 
 # -----------------------
 # Helpers - API key
 # -----------------------
 def get_api_key():
-    # priority: streamlit secrets -> environment -> None
     try:
         return st.secrets["GEMINI_API_KEY"]
     except Exception:
-        pass
-    return os.getenv("GEMINI_API_KEY")
+        return os.getenv("GEMINI_API_KEY")
 
 API_KEY = get_api_key()
 
@@ -87,11 +84,8 @@ st.markdown(
   color: #e6faff;
   font-family: 'Plus Jakarta Sans', Inter, system-ui;
 }
-
-/* Header styles */
 .header { text-align:center; margin-top:10px; margin-bottom:10px; }
-.header h1 {
-  font-size:42px; font-weight:900; letter-spacing:3px;
+.header h1 { font-size:42px; font-weight:900; letter-spacing:3px;
   background: linear-gradient(90deg, var(--neonA), var(--neonB));
   -webkit-background-clip:text; -webkit-text-fill-color:transparent;
   text-shadow: 0 0 20px rgba(0,245,255,0.8), 0 0 35px rgba(255,64,196,0.5);
@@ -144,7 +138,6 @@ st.markdown(
 }
 .floating-expander details[open] { box-shadow: 0 0 60px rgba(0,245,255,0.6), 0 0 90px rgba(255,64,196,0.4) !important; }
 
-/* summary style and neon icon */
 .floating-expander details summary {
   background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
   padding: 14px !important;
@@ -170,98 +163,122 @@ footer { visibility:hidden; }
 """, unsafe_allow_html=True)
 
 # -----------------------
-# Chat assistant implementation (Gemini)
+# Model settings and fallbacks
 # -----------------------
-MODEL_NAME = "models/gemini-2.5-pro"  # change if needed
+# You can change MODEL_NAME to your preferred model; system will automatically try fallbacks if endpoint returns 404/403.
+DEFAULT_MODEL_NAME = os.getenv("OCULAIRE_MODEL_NAME", "models/gemini-2.5-pro")  # your preference
+# fallback list (order matters) - we include a known working older model as fallback
+MODEL_FALLBACKS = [DEFAULT_MODEL_NAME, "models/gemini-1.5-flash-latest", "models/gemini-1.5-flash"]
 
-def ask_glaucoma_assistant(question, history, api_key):
+# -----------------------
+# Assistant function with robust fallbacks
+# -----------------------
+def ask_glaucoma_assistant(question, history, api_key, fallbacks=MODEL_FALLBACKS):
     """
-    Send question + short conversation history to Gemini (SDK or REST fallback).
-    Returns assistant text (string) or raises exception.
+    Try SDK (if available) using first viable model name, otherwise try REST endpoints
+    with fallbacks. Returns (text, used_model_name) or raises RuntimeError.
     """
     if not api_key or not api_key.strip():
         raise RuntimeError("No Gemini API key configured. Put GEMINI_API_KEY in Streamlit secrets or environment.")
+
     system_instruction = (
         "You are a specialist assistant for glaucoma, OCT and RNFLT. "
         "Answer only glaucoma/OCT/RNFLT related educational questions concisely (<=200 words). "
         "Include a short disclaimer to consult a clinician."
     )
 
-    # Build a short conversation context (last 6 messages)
-    ctx = []
+    # Build a small conversation history
+    context_parts = []
     for msg in history[-6:]:
-        role = "user" if msg["role"] == "user" else "assistant"
-        ctx.append(f"{role}: {msg['content']}")
+        role = "User" if msg["role"] == "user" else "Assistant"
+        context_parts.append(f"{role}: {msg['content']}")
+    prompt = system_instruction + "\n\n" + "\n".join(context_parts) + f"\n\nUser: {question}\n\nAssistant:"
 
-    prompt = system_instruction + "\n\n" + "\n".join(ctx) + f"\n\nUser: {question}\n\nAssistant:"
-
-    # SDK path (if available)
+    # If SDK present: try once with the preferred model name (if SDK supports it).
     if USE_SDK:
-        try:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(MODEL_NAME)
-            chat_history = []
-            for msg in history[-6:]:
-                role = "user" if msg["role"] == "user" else "model"
-                chat_history.append({"role": role, "parts": [msg["content"]]})
-            chat = model.start_chat(history=chat_history)
-            resp = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
-            text = resp.text
-            return text if isinstance(text, str) else str(text)
-        except Exception as e:
-            # try REST fallback if SDK fails
-            # proceed to REST section below after logging
-            st.sidebar.error(f"SDK call failed: {e}")
+        # Attempt SDK with each candidate model until success
+        for model_name in fallbacks:
+            try:
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel(model_name)
+                # build chat history in SDK format
+                chat_history = []
+                for msg in history[-6:]:
+                    role = "user" if msg["role"] == "user" else "model"
+                    chat_history.append({"role": role, "parts": [msg["content"]]})
+                chat = model.start_chat(history=chat_history)
+                resp = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
+                text = resp.text
+                if text:
+                    return text, model_name
+            except Exception as e:
+                # continue to next model fallback; log in sidebar later
+                last_err = e
+        # if all SDK attempts failed, continue to REST fallbacks
 
-    # REST fallback
-    url = "https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.6, "maxOutputTokens": 400}
-    }
-    resp = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=30)
-    if resp.status_code == 200:
-        j = resp.json()
+    # REST fallback: try each fallback model endpoint until success
+    for model_name in fallbacks:
         try:
-            text = j["candidates"][0]["content"]["parts"][0]["text"]
-            return text
-        except Exception as e:
-            raise RuntimeError(f"Malformed response JSON: {e}\n\n{json.dumps(j)[:800]}")
-    elif resp.status_code == 403:
-        raise RuntimeError("API Key invalid or restricted (403). Check key & restrictions.")
-    else:
-        raise RuntimeError(f"API Error {resp.status_code}: {resp.text[:800]}")
+            url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={api_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.6, "maxOutputTokens": 400}
+            }
+            r = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=30)
+            if r.status_code == 200:
+                data = r.json()
+                # attempt to extract text
+                try:
+                    text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    return text, model_name
+                except Exception as e:
+                    raise RuntimeError(f"Malformed response JSON from {model_name}: {e}\nResponse: {json.dumps(data)[:800]}")
+            elif r.status_code in (403, 404):
+                # try next fallback
+                last_status = r.status_code
+                last_body = r.text[:400]
+                continue
+            else:
+                # other error; raise helpful message
+                raise RuntimeError(f"API Error {r.status_code}: {r.text[:800]}")
+        except requests.RequestException as re:
+            last_status = getattr(re, "status_code", None)
+            last_body = str(re)[:400]
+            continue
+
+    # If we reached here, all fallbacks failed
+    raise RuntimeError("All model endpoints failed (403/404 or network). Check API key and model names. "
+                       "Tried: " + ", ".join(fallbacks))
 
 # -----------------------
-# Load ML models/resources (cached)
+# Load optional models/resources (if present)
 # -----------------------
 @st.cache_resource
-def load_models_and_resources():
+def load_resources():
+    # bscan model optional
     b_model = None
-    scaler = kmeans = avg_healthy = avg_glaucoma = thin_cluster = None
-    # load bscan model (optional)
     try:
-        b_model = None
         if os.path.exists("bscan_cnn.h5"):
             import tensorflow as tf
             b_model = tf.keras.models.load_model("bscan_cnn.h5", compile=False)
     except Exception:
         b_model = None
-    # load other resources (optional)
+    # other files optional
+    scaler = kmeans = avg_healthy = avg_glaucoma = thin_cluster = None
     try:
         scaler = joblib.load("rnflt_scaler.joblib") if os.path.exists("rnflt_scaler.joblib") else None
         kmeans = joblib.load("rnflt_kmeans.joblib") if os.path.exists("rnflt_kmeans.joblib") else None
         avg_healthy = np.load("avg_map_healthy.npy") if os.path.exists("avg_map_healthy.npy") else None
         avg_glaucoma = np.load("avg_map_glaucoma.npy") if os.path.exists("avg_map_glaucoma.npy") else None
-        thin_cluster = 0 if (avg_healthy is not None and np.nanmean(avg_healthy) > np.nanmean(avg_glaucoma)) else 1
+        thin_cluster = 0 if (avg_healthy is not None and avg_glaucoma is not None and np.nanmean(avg_healthy) > np.nanmean(avg_glaucoma)) else 1
     except Exception:
         scaler = kmeans = avg_healthy = avg_glaucoma = thin_cluster = None
     return b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster
 
-b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models_and_resources()
+b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_resources()
 
 # -----------------------
-# Helper: RNFLT & B-scan processing helpers
+# Helper processing functions
 # -----------------------
 def process_npz_file_like(file_like):
     try:
@@ -271,12 +288,8 @@ def process_npz_file_like(file_like):
             arr = data["volume"]
         else:
             arr = data[data.files[0]]
-        # if 3D, take first slice if needed
         if arr.ndim == 3:
-            # if volume: choose mean across first axis or take [0]
-            arr2 = arr
-            # If shape (N,H,W) and N>1 we can average or choose first. We'll choose mean of all slices to produce RNFLT map.
-            arr = np.nanmean(arr2, axis=0)
+            arr = np.nanmean(arr, axis=0)
         vals = arr.flatten().astype(float)
         metrics = {"mean": float(np.nanmean(vals)), "std": float(np.nanstd(vals)), "min": float(np.nanmin(vals)), "max": float(np.nanmax(vals))}
         return arr, metrics
@@ -329,7 +342,7 @@ def gradcam_for_model(batch, model):
         return None
 
 # -----------------------
-# Utility: PNG/PDF outputs
+# Utilities: png/pdf
 # -----------------------
 def fig_to_png_bytes(fig):
     buf = io.BytesIO()
@@ -346,19 +359,17 @@ def create_pdf_bytes(figs):
     return buf.getvalue()
 
 # -----------------------
-# Sidebar: RNFLT / B-scan options and converter
+# Sidebar - RNFLT & B-scan tools
 # -----------------------
 st.sidebar.title("RNFLT & B-scan Tools")
-
-# RNFLT input mode
 rnflt_input_mode = st.sidebar.radio("RNFLT input type", ("NPZ (recommended)", "Image (single RNFLT image)"))
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Image → NPZ converter (pack slices)")
-st.sidebar.markdown("If you only have RNFLT slice images, upload them (ordered). I'll pack into `volume` and let you download `.npz`.")
-conv_files = st.sidebar.file_uploader("Upload RNFLT slice images (ordered)", accept_multiple_files=True, type=["png","jpg","jpeg"], help="Upload slices in order; limit per file depends on deployment.")
+st.sidebar.markdown("Upload RNFLT slice images in order; pack into a `volume` and download `.npz`.")
+conv_files = st.sidebar.file_uploader("Upload RNFLT slice images (ordered)", accept_multiple_files=True, type=["png","jpg","jpeg"])
 if conv_files:
-    if st.sidebar.button("Convert to .npz and prepare download"):
+    if st.sidebar.button("Convert to .npz and download"):
         try:
             slices = []
             for f in conv_files:
@@ -377,13 +388,14 @@ if conv_files:
 st.sidebar.markdown("---")
 st.sidebar.subheader("B-scan options")
 bscan_allow_predict = st.sidebar.checkbox("Enable B-scan prediction (if model available)", value=True)
-st.sidebar.markdown("If `bscan_cnn.h5` is missing, predictions are disabled but upload preview still works.")
-
 st.sidebar.markdown("---")
-st.sidebar.markdown("🔑 API key status & debug")
-st.sidebar.write("Gemini API key present:", bool(API_KEY))
+st.sidebar.subheader("Debug / API")
+st.sidebar.write("Gemini API key loaded:", bool(API_KEY))
 st.sidebar.write("Using SDK:", USE_SDK)
-st.sidebar.write("Last raw reply:", (st.session_state.last_raw_reply[:300] + "...") if st.session_state.last_raw_reply and len(st.session_state.last_raw_reply) > 300 else (st.session_state.last_raw_reply or "—"))
+st.sidebar.write("Last used model:", st.session_state.get("last_success_model", "—"))
+last_raw = st.session_state.get("last_raw_reply", None)
+if last_raw:
+    st.sidebar.text_area("Last raw reply (truncated)", value=(last_raw[:800] + ("..." if len(last_raw)>800 else "")), height=140)
 
 # -----------------------
 # Header
@@ -429,7 +441,7 @@ with colB:
 threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
 # -----------------------
-# Analysis (RNFLT & B-scan)
+# Analysis pipeline
 # -----------------------
 if (rnflt_arr is not None) or (bscan_file is not None):
     figs = []
@@ -440,16 +452,15 @@ if (rnflt_arr is not None) or (bscan_file is not None):
     if rnflt_arr is not None:
         try:
             metrics = rnflt_metrics
-            X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
-            # cluster / label
             if scaler is not None and kmeans is not None:
+                X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
                 Xs = scaler.transform(X)
                 cluster = int(kmeans.predict(Xs)[0])
                 label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
             else:
                 cluster = "?"
                 label_r = "Unknown"
-            # compute risk/diff
+
             if avg_healthy is not None:
                 healthy_map = avg_healthy
                 if rnflt_arr.shape != healthy_map.shape:
@@ -463,7 +474,6 @@ if (rnflt_arr is not None) or (bscan_file is not None):
             sev = (risky / total) * 100 if total else 0.0
             severity_overall = max(severity_overall, float(sev))
 
-            # metrics display
             m1, m2, m3, m4 = st.columns([2,2,2,2])
             m1.markdown(f"<div style='color:var(--muted); font-size:12px;'>Status</div><div style='font-weight:900; font-size:22px; color:#fff; text-shadow:0 0 12px rgba(0,245,255,0.6);'>{'🚨' if 'Glaucoma' in label_r else '✅'} {label_r}</div>", unsafe_allow_html=True)
             m2.markdown(f"<div style='color:var(--muted); font-size:12px;'>Mean RNFLT</div><div style='font-weight:800; font-size:22px; color:#fff;'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
@@ -497,7 +507,7 @@ if (rnflt_arr is not None) or (bscan_file is not None):
                 """
             st.markdown(render_sev_html(severity_overall), unsafe_allow_html=True)
 
-            # debug plots
+            # plots
             fig, axes = plt.subplots(1,3,figsize=(18,5), constrained_layout=True)
             axes[0].imshow(rnflt_arr, cmap='turbo'); axes[0].set_title("Uploaded RNFLT"); axes[0].axis('off')
             axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30); axes[1].set_title("Difference (vs Healthy)"); axes[1].axis('off')
@@ -536,7 +546,8 @@ if (rnflt_arr is not None) or (bscan_file is not None):
                     orig_w, orig_h = image_pil.size
                     overlay_up = cv2.resize(overlay_small, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
                     overlay_pil = Image.fromarray(overlay_up)
-                    st.image([image_pil.resize((display_width, int(display_width * orig_h / orig_w))), overlay_pil.resize((display_width, int(display_width * orig_h / orig_w)))],
+                    st.image([image_pil.resize((display_width, int(display_width * orig_h / orig_w))),
+                              overlay_pil.resize((display_width, int(display_width * orig_h / orig_w)))],
                              caption=["Original B-Scan (preview)", "Grad-CAM Overlay (preview)"], width=display_width)
                 else:
                     st.image(image_pil, caption="Original B-Scan (preview)", width=display_width)
@@ -551,7 +562,7 @@ if (rnflt_arr is not None) or (bscan_file is not None):
     st.markdown("<h3 style='text-align:center'>Overall Severity Index</h3>", unsafe_allow_html=True)
     st.markdown(render_sev_html(severity_overall), unsafe_allow_html=True)
 
-    # download options for plots
+    # downloads
     if figs:
         pngb = fig_to_png_bytes(figs[0])
         pdfb = create_pdf_bytes(figs)
@@ -586,38 +597,36 @@ with st.expander("💬 Ask AI assistant", expanded=False):
     with col2:
         clear_btn = st.button("🗑️ Clear chat", use_container_width=True)
 
-    # Robust send handler - no experimental_rerun
     if send_btn:
         if not user_question or user_question.strip() == "":
             st.warning("Please type a question first.")
         else:
-            # Append user message immediately
+            # Append user message
             st.session_state.chat_history.append({"role": "user", "content": user_question})
-            # Temporary assistant placeholder so user sees immediate feedback
+            # Append temporary placeholder
             st.session_state.chat_history.append({"role": "assistant", "content": "⏳ Thinking... contacting Gemini..."})
-            # Ensure UI updates via state tick (Streamlit will rerun after this button click completes)
-            st.session_state.ui_tick += 1
-
-            # Do the remote call synchronously and replace the placeholder with the real reply
+            # Make the API call synchronously (button click already causes a rerun)
             try:
-                reply_text = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
+                reply_text, used_model = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY, fallbacks=MODEL_FALLBACKS)
+                # record success
+                st.session_state.last_raw_reply = reply_text
+                st.session_state.last_success_model = used_model
             except Exception as e:
                 reply_text = f"❌ Assistant error: {str(e)}"
-            # store raw reply for sidebar/debug
-            st.session_state.last_raw_reply = reply_text
+                st.session_state.last_raw_reply = repr(e)
+                st.session_state.last_success_model = None
 
-            # remove the previous "Thinking..." assistant placeholder (search from end)
+            # Remove the last placeholder "Thinking..." message (search from end)
             for i in range(len(st.session_state.chat_history)-1, -1, -1):
                 if st.session_state.chat_history[i]["role"] == "assistant" and "Thinking..." in st.session_state.chat_history[i]["content"]:
                     st.session_state.chat_history.pop(i)
                     break
-            # append actual reply
+            # Append actual reply
             st.session_state.chat_history.append({"role": "assistant", "content": reply_text})
-            # increment tick to force UI to reflect new messages (Streamlit reruns automatically after button event)
-            st.session_state.ui_tick += 1
 
     if clear_btn:
         st.session_state.chat_history = []
-        st.session_state.ui_tick += 1
+        st.session_state.last_raw_reply = None
+        st.session_state.last_success_model = None
 
 st.markdown('</div>', unsafe_allow_html=True)
