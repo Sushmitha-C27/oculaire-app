@@ -1,4 +1,4 @@
-# app.py — OCULAIRE Neon Lab v5 with final floating pill + overlay chat (white label)
+# app.py — OCULAIRE Neon Lab v5 with beating floating pill + overlay chat
 # Run: streamlit run app.py
 
 import streamlit as st
@@ -36,7 +36,13 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
+# Keep last processed question to avoid duplicate processing across reruns
+if 'last_processed_q' not in st.session_state:
+    st.session_state['last_processed_q'] = None
+
+# -----------------------
 # Get API key from Streamlit secrets or environment variable
+# -----------------------
 def get_api_key():
     try:
         return st.secrets["GEMINI_API_KEY"]
@@ -66,7 +72,7 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — Neon Theme + Animations (keeps your styles)
+# CSS — Neon Theme + Animations
 # -----------------------
 st.markdown("""
 <style>
@@ -146,71 +152,6 @@ st.markdown("""
   text-shadow: 0 0 20px rgba(0,245,255,0.3);
 }
 
-/* Floating Chat Bubble (pill) */
-.floating-bubble {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  z-index: 9999;
-}
-.bubble-pill {
-  display:flex;
-  align-items:center;
-  gap:10px;
-  padding:12px 18px;
-  border-radius:999px;
-  background: linear-gradient(90deg, var(--neonA), var(--neonB));
-  color:#021617;
-  font-weight:800;
-  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5);
-  cursor:pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
-}
-.bubble-pill:hover { transform: scale(1.04); box-shadow: 0 0 40px rgba(0,245,255,0.8); }
-
-/* Floating Chat Overlay (the actual widget) */
-.chat-overlay {
-  position: fixed;
-  bottom: 100px;
-  right: 24px;
-  width: 420px;
-  max-width: 92vw;
-  z-index: 10000;
-  border-radius: 14px;
-  overflow: hidden;
-  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98));
-  border: 1px solid rgba(0,245,255,0.08);
-  box-shadow: 0 10px 40px rgba(0,0,0,0.6);
-}
-.chat-overlay .header {
-  padding: 12px 16px;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}
-.chat-overlay .body {
-  padding: 12px 16px;
-  max-height: 360px;
-  overflow-y: auto;
-}
-.chat-overlay .footer {
-  padding: 12px 12px;
-  background: rgba(255,255,255,0.02);
-  display:flex;
-  gap:8px;
-  align-items:center;
-}
-.chat-overlay .input {
-  flex:1;
-}
-.close-btn {
-  background:none;
-  border:none;
-  color:var(--muted);
-  cursor:pointer;
-  font-size:18px;
-}
-
 /* Ensure footer hidden */
 footer { visibility:hidden; }
 </style>
@@ -274,7 +215,7 @@ Important: Always remind users to consult healthcare professionals for medical d
         return f"❌ Error: {str(e)}\n\nTip: Make sure your API key from https://aistudio.google.com/apikey is unrestricted."
 
 # -----------------------
-# Header (keeps your header)
+# Header
 # -----------------------
 st.markdown("""
 <div class="header">
@@ -285,7 +226,7 @@ st.markdown("""
 st.markdown("---")
 
 # -----------------------
-# Load Models (unchanged)
+# Load Models
 # -----------------------
 @st.cache_resource
 def load_models():
@@ -306,7 +247,7 @@ def load_models():
 b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models()
 
 # -----------------------
-# Helpers (unchanged)
+# Helpers
 # -----------------------
 def process_npz(f):
     try:
@@ -395,7 +336,7 @@ def render_severity(pct):
     return html
 
 # -----------------------
-# SIDEBAR - API Key Status (unchanged)
+# SIDEBAR - API Key Status
 # -----------------------
 with st.sidebar:
     st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
@@ -427,7 +368,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # -----------------------
-# LAYOUT (RNFLT / B-Scan upload UI is unchanged)
+# LAYOUT (RNFLT / B-Scan upload UI)
 # -----------------------
 colA, colB = st.columns(2)
 
@@ -522,202 +463,224 @@ if rnflt_file or bscan_file:
 st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
-# ==========================================================
-# FINAL FLOATING PILL + WHITE LABEL + OVERLAY CHAT WIDGET
-# Replace any previous floating-chat/expander code with this
-# ==========================================================
+# --------------------------
+# BEATING PILL + OVERLAY (client open/close, server-side processing of question param)
+# --------------------------
 
-# Read query param to decide whether chat overlay is open
+# Read query params so server can process a submitted question once
 query_params = st.experimental_get_query_params()
-open_chat = query_params.get("open_chat", ["0"])[0] in ["1", "true", "True"]
+open_chat = query_params.get("open_chat", ["0"])[0] in ("1", "true", "True")
+question_param = query_params.get("question", [None])[0]
 
-# -------------------------------------------------------------------
-# 1) Floating pill (with **white label text**) — always visible
-# -------------------------------------------------------------------
-pill_html = """
-<div style="position:fixed; bottom:24px; right:24px; z-index:99999;">
+# If question_param present and not processed before, process it and store history
+if question_param:
+    last_q = st.session_state.get("last_processed_q", None)
+    if question_param != last_q:
+        st.session_state["last_processed_q"] = question_param
+        st.session_state.chat_history.append({"role": "user", "content": question_param})
+        if API_KEY:
+            reply = ask_glaucoma_assistant(question_param, st.session_state.chat_history, API_KEY)
+        else:
+            reply = "❌ No API key configured. Add GEMINI_API_KEY to secrets or environment."
+        st.session_state.chat_history.append({"role": "assistant", "content": reply})
+        # Keep overlay open but remove raw question param to avoid reprocessing on refresh
+        st.experimental_set_query_params(open_chat="1")
+        st.experimental_rerun()
 
-  <div onclick="
-      (function(){
-        try {
-          const url = new URL(window.location.href);
-          url.searchParams.set('open_chat', '1');
-          window.location.href = url.toString();
-        } catch(e){
-          window.location.search='?open_chat=1';
-        }
-      })();
-    "
-    style="
-      display:flex;
-      align-items:center;
-      gap:12px;
-      padding:12px 20px;
-      border-radius:999px;
-      cursor:pointer;
-      background:linear-gradient(90deg,#00f5ff,#ff40c4);
-      box-shadow:0 0 30px rgba(0,245,255,0.5), 0 0 40px rgba(255,64,196,0.5);
-      transition:0.15s ease;
-    "
-  >
+# Client-side pill + overlay (JS handles opening/closing, beating animation, and sending by navigating with ?question=)
+floating_html = r'''
+<div id="oculaire-float-root">
+  <style>
+    /* pill container */
+    #oculaire-pill {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 200000;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 20px;
+      border-radius: 999px;
+      background: linear-gradient(90deg,#00f5ff,#ff40c4);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 40px rgba(0,245,255,0.12);
+      cursor: pointer;
+      transform-origin: center;
+      animation: beat 1.6s infinite ease-in-out;
+      -webkit-user-select: none;
+      user-select: none;
+    }
 
-    <!-- Icon container -->
-    <div style="
-        width:38px;
-        height:38px;
-        border-radius:50%;
-        background:white;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        box-shadow:0 4px 20px rgba(0,0,0,0.4);
-        font-size:19px;
-    ">💬</div>
+    /* beat animation (subtle scale) */
+    @keyframes beat {
+      0% { transform: scale(1); filter: drop-shadow(0 0 12px rgba(0,245,255,0.06)); }
+      25% { transform: scale(1.02); filter: drop-shadow(0 0 20px rgba(0,245,255,0.12)); }
+      50% { transform: scale(1.04); filter: drop-shadow(0 0 30px rgba(255,64,196,0.15)); }
+      75% { transform: scale(1.02); filter: drop-shadow(0 0 20px rgba(0,245,255,0.12)); }
+      100% { transform: scale(1); filter: drop-shadow(0 0 12px rgba(0,245,255,0.06)); }
+    }
 
-    <!-- LABEL (FORCED WHITE TEXT) -->
-    <div style="
-        font-size:16px;
-        font-weight:800;
-        color:white !important;
-        text-shadow:0 0 6px rgba(0,0,0,0.6);
-    ">Ask OCULAIRE</div>
+    /* icon circle */
+    #oculaire-pill .icon {
+      width: 38px; height: 38px; border-radius:50%;
+      background: white; display:flex; align-items:center; justify-content:center;
+      font-size: 18px; box-shadow: 0 4px 18px rgba(0,0,0,0.45);
+    }
 
+    /* pill label forced white */
+    #oculaire-pill .label {
+      font-weight: 800; font-size: 15px; color: white !important;
+      text-shadow: 0 0 6px rgba(0,0,0,0.6);
+      padding-right: 6px;
+    }
+
+    /* overlay - initially hidden (display:none) */
+    #oculaire-overlay {
+      position: fixed;
+      bottom: 100px;
+      right: 24px;
+      z-index: 200001;
+      width: 420px;
+      max-width: 92vw;
+      border-radius: 14px;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98));
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+      display: none;
+    }
+
+    #oculaire-overlay .hdr {
+      padding: 12px 14px; display:flex; justify-content:space-between; align-items:center;
+      background: rgba(255,255,255,0.02);
+    }
+    #oculaire-overlay .hdr .title { color: white; font-weight:800; font-size:16px; }
+    #oculaire-overlay .hdr .close-btn {
+      background:none; border:none; font-size:18px; color:white; cursor:pointer;
+    }
+
+    #oculaire-overlay .body {
+      padding: 12px 12px; max-height: 300px; overflow-y: auto; color: white;
+      background: transparent;
+    }
+
+    #oculaire-overlay .footer {
+      padding: 10px 12px; display:flex; gap:8px; align-items:center; background: rgba(255,255,255,0.01);
+    }
+
+    #oculaire-overlay input[type="text"] {
+      width: 100%; padding:10px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.02); color:white; outline:none;
+    }
+
+    .oculaire-btn {
+      padding: 8px 12px; border-radius:8px; border:none; cursor:pointer; font-weight:700;
+    }
+    .oculaire-btn.send { background: linear-gradient(90deg,#00f5ff,#ff40c4); color:#021617; }
+    .oculaire-btn.clear { background:transparent; color:white; border:1px solid rgba(255,255,255,0.06); }
+
+    @media (max-width: 480px) {
+      #oculaire-overlay { right: 8px; left: 8px; width: auto; bottom: 90px; }
+      #oculaire-pill { right: 12px; bottom: 12px; padding:10px 14px; }
+    }
+
+  </style>
+
+  <!-- PILL -->
+  <div id="oculaire-pill" title="Ask OCULAIRE">
+    <div class="icon">💬</div>
+    <div class="label">Ask OCULAIRE</div>
   </div>
 
-</div>
-"""
-
-components.html(pill_html, height=130)
-
-# -------------------------------------------------------------------
-# 2) Chat Overlay (only visible when open_chat == True)
-# -------------------------------------------------------------------
-if open_chat:
-
-    # Overlay HTML shell (background + header only)
-    overlay_html = """
-    <div style="
-        position:fixed;
-        bottom:100px;
-        right:24px;
-        width:420px;
-        max-width:92vw;
-        z-index:100000;
-        border-radius:16px;
-        overflow:hidden;
-        background:linear-gradient(180deg,rgba(10,15,37,0.98),rgba(2,2,8,0.98));
-        border:1px solid rgba(255,255,255,0.08);
-        box-shadow:0 20px 60px rgba(0,0,0,0.6);
-    ">
-
-      <div style="
-          padding:14px 18px;
-          display:flex; 
-          justify-content:space-between;
-          align-items:center;
-          background:rgba(255,255,255,0.03);
-      ">
-          <div style="font-size:18px; font-weight:800; color:white;">
-              🤖 OCULAIRE Assistant
-          </div>
-
-          <button onclick="
-              (function(){
-                try {
-                  const url = new URL(window.location.href);
-                  url.searchParams.delete('open_chat');
-                  window.location.href = url.toString();
-                } catch(e){
-                  window.location.search='';
-                }
-              })();
-          "
-          style="
-              background:none;
-              color:white;
-              border:none;
-              font-size:20px;
-              cursor:pointer;
-          ">✖</button>
-      </div>
-
+  <!-- OVERLAY -->
+  <div id="oculaire-overlay" role="dialog" aria-label="OCULAIRE chat">
+    <div class="hdr">
+      <div class="title">🤖 OCULAIRE Assistant</div>
+      <button class="close-btn" aria-label="Close chat">✖</button>
     </div>
-    """
-    components.html(overlay_html, height=0)
 
-    # Container for Streamlit widgets inside overlay
-    st.markdown("""
-    <div style="
-        position:fixed;
-        bottom:115px;
-        right:40px;
-        width:380px;
-        max-width:90vw;
-        z-index:100001;
-        padding:10px;
-        background:rgba(10,10,20,0.7);
-        backdrop-filter:blur(10px);
-        border-radius:12px;
-    ">
-    """, unsafe_allow_html=True)
+    <div class="body" id="oculaire-body">
+      <div id="oculaire-messages">
+        <div style="opacity:0.8; font-size:13px; margin-bottom:8px;">Ask me about glaucoma, OCT, RNFLT...</div>
+      </div>
+    </div>
 
-    # ---- Chat messages ----
-    st.markdown("<div style='max-height:250px; overflow-y:auto; padding-right:6px;'>",
-                unsafe_allow_html=True)
-    for msg in st.session_state.chat_history:
-        if msg["role"] == "user":
-            st.markdown(f"""
-            <div style="
-                background:rgba(0,245,255,0.15);
-                padding:10px;
-                border-left:3px solid #00f5ff;
-                border-radius:8px;
-                margin:6px 0;
-                color:white;
-            ">
-                <strong>You:</strong> {msg['content']}
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown(f"""
-            <div style="
-                background:rgba(255,64,196,0.15);
-                padding:10px;
-                border-left:3px solid #ff40c4;
-                border-radius:8px;
-                margin:6px 0;
-                color:white;
-            ">
-                <strong>OCULAIRE:</strong> {msg['content']}
-            </div>
-            """, unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    <div class="footer">
+      <input id="oculaire-input" type="text" placeholder="Type your question here..." aria-label="Chat input">
+      <button class="oculaire-btn send" id="oculaire-send">Send</button>
+      <button class="oculaire-btn clear" id="oculaire-clear">Clear</button>
+    </div>
+  </div>
 
-    # ---- Input + buttons ----
-    user_text = st.text_input("Ask something about glaucoma:", key="popup_input")
+  <script>
+    (function(){
+      const pill = document.getElementById('oculaire-pill');
+      const overlay = document.getElementById('oculaire-overlay');
+      const closeBtn = document.querySelector('#oculaire-overlay .close-btn');
+      const sendBtn = document.getElementById('oculaire-send');
+      const clearBtn = document.getElementById('oculaire-clear');
+      const input = document.getElementById('oculaire-input');
 
-    colA, colB = st.columns([4,1])
-    with colA:
-        send = st.button("Send")
-    with colB:
-        clear = st.button("🗑️")
+      // Show overlay if open_chat query param is present at page load
+      try {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('open_chat') === '1') {
+          overlay.style.display = 'block';
+        }
+        // if a question param is present (rare), show overlay too
+        if (params.get('question')) {
+          overlay.style.display = 'block';
+          input.value = params.get('question');
+        }
+      } catch(e){ /* ignore */ }
 
-    if send and user_text:
-        if API_KEY:
-            reply = ask_glaucoma_assistant(user_text, st.session_state.chat_history, API_KEY)
-            st.session_state.chat_history.append({"role":"user","content":user_text})
-            st.session_state.chat_history.append({"role":"assistant","content":reply})
-        else:
-            st.session_state.chat_history.append({"role":"assistant","content":"❌ No API key. Add GEMINI_API_KEY in secrets."})
+      // open overlay immediately (no page reload)
+      pill.addEventListener('click', function(e){
+        overlay.style.display = 'block';
+        setTimeout(()=> input.focus(), 120);
+      });
 
-        st.experimental_set_query_params(open_chat="1")
-        st.experimental_rerun()
+      // close overlay (no reload)
+      closeBtn.addEventListener('click', function(e){
+        overlay.style.display = 'none';
+      });
 
-    if clear:
-        st.session_state.chat_history = []
-        st.experimental_set_query_params(open_chat="1")
-        st.experimental_rerun()
+      // clear just hides and clears input
+      clearBtn.addEventListener('click', function(e){
+        input.value = '';
+        overlay.style.display = 'none';
+      });
 
-    st.markdown("</div>", unsafe_allow_html=True)
+      // Send: encode question into URL and navigate there to let Streamlit process it
+      sendBtn.addEventListener('click', function(e){
+        const q = (input.value || '').trim();
+        if (!q) {
+          input.focus();
+          return;
+        }
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set('open_chat','1');
+          url.searchParams.set('question', q);
+          window.location.href = url.toString();
+        } catch (err) {
+          window.location.search = '?open_chat=1&question=' + encodeURIComponent(q);
+        }
+      });
+
+      // Enter to send
+      input.addEventListener('keydown', function(e){
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          sendBtn.click();
+        }
+      });
+    })();
+  </script>
+</div>
+'''
+
+# render with enough height to avoid clipping
+components.html(floating_html, height=240)
 
 # End of file
