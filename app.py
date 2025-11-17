@@ -1,4 +1,4 @@
-# app.py — OCULAIRE Neon Lab v5 with beating floating pill + overlay chat
+# app.py — OCULAIRE Neon Lab v5 with beating floating pill + overlay chat (full file)
 # Run: streamlit run app.py
 
 import streamlit as st
@@ -487,7 +487,7 @@ if question_param:
         st.experimental_set_query_params(open_chat="1")
         st.experimental_rerun()
 
-# Client-side pill + overlay (JS handles opening/closing, beating animation, and sending by navigating with ?question=)
+# ---------- Updated floating_html with larger input + robust navigation ----------
 floating_html = r'''
 <div id="oculaire-float-root">
   <style>
@@ -511,7 +511,6 @@ floating_html = r'''
       user-select: none;
     }
 
-    /* beat animation (subtle scale) */
     @keyframes beat {
       0% { transform: scale(1); filter: drop-shadow(0 0 12px rgba(0,245,255,0.06)); }
       25% { transform: scale(1.02); filter: drop-shadow(0 0 20px rgba(0,245,255,0.12)); }
@@ -534,7 +533,7 @@ floating_html = r'''
       padding-right: 6px;
     }
 
-    /* overlay - initially hidden (display:none) */
+    /* overlay - initially hidden */
     #oculaire-overlay {
       position: fixed;
       bottom: 100px;
@@ -560,21 +559,30 @@ floating_html = r'''
     }
 
     #oculaire-overlay .body {
-      padding: 12px 12px; max-height: 300px; overflow-y: auto; color: white;
+      padding: 16px 16px; max-height: 300px; overflow-y: auto; color: white;
       background: transparent;
     }
 
+    /* == BIGGER input == */
     #oculaire-overlay .footer {
-      padding: 10px 12px; display:flex; gap:8px; align-items:center; background: rgba(255,255,255,0.01);
+      padding: 12px 12px; display:flex; gap:8px; align-items:center; background: rgba(255,255,255,0.01);
     }
 
     #oculaire-overlay input[type="text"] {
-      width: 100%; padding:10px 12px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);
-      background: rgba(255,255,255,0.02); color:white; outline:none;
+      width: 100%;
+      padding:14px 14px;
+      border-radius:10px;
+      border:1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.02);
+      color:white;
+      outline:none;
+      font-size:15px;           /* larger font */
+      height:44px;              /* larger clickable area */
+      box-sizing: border-box;
     }
 
     .oculaire-btn {
-      padding: 8px 12px; border-radius:8px; border:none; cursor:pointer; font-weight:700;
+      padding: 10px 14px; border-radius:10px; border:none; cursor:pointer; font-weight:800; font-size:14px;
     }
     .oculaire-btn.send { background: linear-gradient(90deg,#00f5ff,#ff40c4); color:#021617; }
     .oculaire-btn.clear { background:transparent; color:white; border:1px solid rgba(255,255,255,0.06); }
@@ -587,7 +595,7 @@ floating_html = r'''
   </style>
 
   <!-- PILL -->
-  <div id="oculaire-pill" title="Ask OCULAIRE">
+  <div id="oculaire-pill" title="Ask OCULAIRE" role="button" tabindex="0">
     <div class="icon">💬</div>
     <div class="label">Ask OCULAIRE</div>
   </div>
@@ -601,7 +609,7 @@ floating_html = r'''
 
     <div class="body" id="oculaire-body">
       <div id="oculaire-messages">
-        <div style="opacity:0.8; font-size:13px; margin-bottom:8px;">Ask me about glaucoma, OCT, RNFLT...</div>
+        <div style="opacity:0.9; font-size:14px; margin-bottom:10px;">Ask me about glaucoma, OCT, RNFLT...</div>
       </div>
     </div>
 
@@ -621,20 +629,24 @@ floating_html = r'''
       const clearBtn = document.getElementById('oculaire-clear');
       const input = document.getElementById('oculaire-input');
 
-      // Show overlay if open_chat query param is present at page load
+      // enable keyboard activation for accessibility
+      pill.addEventListener('keydown', function(e){
+        if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pill.click(); }
+      });
+
+      // Show overlay if open_chat or question present on load
       try {
         const params = new URLSearchParams(window.location.search);
         if (params.get('open_chat') === '1') {
           overlay.style.display = 'block';
         }
-        // if a question param is present (rare), show overlay too
         if (params.get('question')) {
           overlay.style.display = 'block';
           input.value = params.get('question');
         }
-      } catch(e){ /* ignore */ }
+      } catch(e){ console.warn('oculaire: URL params error', e); }
 
-      // open overlay immediately (no page reload)
+      // open overlay immediately (no reload)
       pill.addEventListener('click', function(e){
         overlay.style.display = 'block';
         setTimeout(()=> input.focus(), 120);
@@ -651,19 +663,26 @@ floating_html = r'''
         overlay.style.display = 'none';
       });
 
-      // Send: encode question into URL and navigate there to let Streamlit process it
+      // Send: robust navigation with fallbacks + console logs for debugging
       sendBtn.addEventListener('click', function(e){
         const q = (input.value || '').trim();
-        if (!q) {
-          input.focus();
-          return;
-        }
+        if (!q) { input.focus(); return; }
         try {
           const url = new URL(window.location.href);
           url.searchParams.set('open_chat','1');
           url.searchParams.set('question', q);
+          console.log('oculaire: navigating to', url.toString());
+          // Primary approach
           window.location.href = url.toString();
+          // Fallbacks (in case some hosts block direct assignment)
+          setTimeout(()=> {
+            try { window.location.assign(url.toString()); } catch(e) { console.warn(e); }
+          }, 150);
+          setTimeout(()=> {
+            try { window.open(url.toString(), '_self'); } catch(e) { console.warn(e); }
+          }, 300);
         } catch (err) {
+          console.warn('oculaire send fallback', err);
           window.location.search = '?open_chat=1&question=' + encodeURIComponent(q);
         }
       });
@@ -681,6 +700,6 @@ floating_html = r'''
 '''
 
 # render with enough height to avoid clipping
-components.html(floating_html, height=240)
+components.html(floating_html, height=260)
 
 # End of file
