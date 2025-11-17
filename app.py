@@ -1,8 +1,7 @@
-# app.py — OCULAIRE Neon Lab vFinal (FULL fancy, ~650+ lines)
+# app.py — OCULAIRE Neon Lab v5 (Pure-Python Floating UI — no build)
 # Run: streamlit run app.py
 
 import streamlit as st
-import streamlit.components.v1 as components
 import numpy as np
 import joblib
 import tensorflow as tf
@@ -16,19 +15,12 @@ import requests
 import json
 import time
 
-# Prefer SDK if installed; fallback to REST
+# Try to import google.generativeai, fallback to requests
 try:
     import google.generativeai as genai
     USE_SDK = True
 except Exception:
     USE_SDK = False
-
-# -----------------------
-# MODEL CONFIG
-# -----------------------
-# Use the MODEL_NAME identifier for both SDK and REST calls.
-# REST expects 'models/' prefix: e.g., "models/gemini-2.5-pro"
-MODEL_NAME = "models/gemini-2.5-pro"
 
 # -----------------------
 # Page Config
@@ -43,23 +35,30 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
-# Keep last processed question to prevent duplicate processing across reruns
+# overlay open flag
+if 'overlay_open' not in st.session_state:
+    st.session_state.overlay_open = False
+
+# Keep last processed question to avoid accidental duplicate processing
 if 'last_processed_q' not in st.session_state:
-    st.session_state['last_processed_q'] = None
+    st.session_state.last_processed_q = None
 
 # -----------------------
 # Get API key from Streamlit secrets or environment variable
 # -----------------------
 def get_api_key():
+    # Try Streamlit secrets first (for deployment)
     try:
-        key = st.secrets["GEMINI_API_KEY"]
-        if key:
-            return key
+        k = st.secrets["GEMINI_API_KEY"]
+        if k:
+            return k
     except Exception:
         pass
+    # Try environment variable (for local development)
     env_key = os.getenv("GEMINI_API_KEY")
     if env_key:
         return env_key
+    # Return None if not found (user will need to input)
     return None
 
 API_KEY = get_api_key()
@@ -81,7 +80,8 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — Neon Theme + Animations
+# CSS — Neon Theme + Floating pill
+# (we inject CSS for the app and for floating pill/button overlay)
 # -----------------------
 st.markdown("""
 <style>
@@ -92,132 +92,107 @@ st.markdown("""
   --neonB:#ff40c4;
   --muted:#a4b1c9;
 }
+
+/* App background + typography */
 .stApp {
   background: radial-gradient(circle at 20% 20%, #091133, #020208 90%);
   color: #e6faff;
-  font-family: 'Plus Jakarta Sans', Inter, system-ui;
-}
-.header { text-align:center; margin-top:10px; margin-bottom:10px; }
-.header h1 {
-  font-size:42px; font-weight:900; letter-spacing:3px;
-  background: linear-gradient(90deg, var(--neonA), var(--neonB));
-  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
-  text-shadow: 0 0 20px rgba(0,245,255,0.8), 0 0 35px rgba(255,64,196,0.5);
-}
-.header h3 { color:var(--muted); font-weight:400; font-size:15px; text-shadow: 0 0 12px rgba(255,255,255,0.2); }
-.card {
-  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
-  border:1px solid rgba(255,255,255,0.05);
-  box-shadow: 0 0 25px rgba(0,245,255,0.05), 0 0 35px rgba(255,64,196,0.05);
-  border-radius:12px; padding:16px;
-}
-.metric-label { color:var(--muted); font-size:12px; }
-.large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.5); }
-
-/* Severity Bar */
-.sev-wrap { margin-top:16px; }
-.sev-outer { height:18px; width:100%; background: rgba(255,255,255,0.05); border-radius:14px; overflow:hidden; }
-.sev-inner {
-  height:100%; width:0%;
-  background: linear-gradient(90deg,var(--neonA),var(--neonB));
-  border-radius:14px;
-  box-shadow: 0 0 25px rgba(0,245,255,0.6), 0 0 25px rgba(255,64,196,0.5);
-  transition: width 1s ease-in-out;
-}
-.sev-chip {
-  margin-top:6px; display:inline-block;
-  padding:6px 12px; border-radius:12px;
-  font-weight:800; font-size:14px; color:#021617;
-  background: linear-gradient(90deg, rgba(0,245,255,0.9), rgba(255,64,196,0.9));
-  box-shadow: 0 0 20px rgba(0,245,255,0.4), 0 0 20px rgba(255,64,196,0.3);
-  animation: pulse 1.8s infinite;
-}
-@keyframes pulse { 0%{transform:scale(1);} 50%{transform:scale(1.06);} 100%{transform:scale(1);} }
-.download-btns { margin-top:14px; display:flex; gap:10px; justify-content:center; }
-
-/* Chat message styling */
-.user-msg {
-  background: linear-gradient(135deg, rgba(0,245,255,0.15), rgba(0,245,255,0.05));
-  border-left: 3px solid var(--neonA);
-  padding: 12px;
-  border-radius: 8px;
-  margin: 8px 0;
-}
-.assistant-msg {
-  background: linear-gradient(135deg, rgba(255,64,196,0.15), rgba(255,64,196,0.05));
-  border-left: 3px solid var(--neonB);
-  padding: 12px;
-  border-radius: 8px;
-  margin: 8px 0;
-}
-.chat-header {
-  text-align: center;
-  background: linear-gradient(90deg, var(--neonA), var(--neonB));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  font-weight: 800;
-  font-size: 24px;
-  margin-bottom: 20px;
-  text-shadow: 0 0 20px rgba(0,245,255,0.3);
+  font-family: 'Inter', system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
 }
 
-/* Floating Chat Bubble (fallback) */
-.chat-bubble {
+/* Floating pill visual (pure HTML) */
+#oculaire-pill-visual {
   position: fixed;
-  bottom: 30px;
-  right: 30px;
-  width: 70px;
-  height: 70px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--neonA), var(--neonB));
-  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5);
+  right: 24px;
+  bottom: 24px;
+  z-index: 99999;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:12px 18px;
+  border-radius:999px;
+  background: linear-gradient(90deg,var(--neonA),var(--neonB));
+  color:#021617;
+  font-weight:800;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 40px rgba(0,245,255,0.12);
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-  z-index: 9999;
-  animation: float 3s ease-in-out infinite, glow 2s ease-in-out infinite;
-  transition: transform 0.3s ease;
-}
-.chat-bubble:hover {
-  transform: scale(1.1);
-  box-shadow: 0 0 40px rgba(0,245,255,0.8), 0 0 50px rgba(255,64,196,0.7);
-}
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
-}
-@keyframes glow {
-  0%, 100% { box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5); }
-  50% { box-shadow: 0 0 40px rgba(0,245,255,0.9), 0 0 60px rgba(255,64,196,0.8); }
 }
 
-/* Ensure footer hidden */
-footer { visibility:hidden; }
+/* Icon circle inside pill */
+#oculaire-pill-visual .icon {
+  width:38px; height:38px; border-radius:50%; background:white; display:flex; align-items:center; justify-content:center; font-size:18px;
+}
+
+/* Text forced white */
+#oculaire-pill-visual .label { color:#021617; font-weight:900; }
+
+/* Transparent Streamlit button overlay (captures clicks) */
+/* We target the button by its aria-label — label used below: "OCULAIRE_OPEN_BTN" */
+button[aria-label="OCULAIRE_OPEN_BTN"] {
+  position: fixed !important;
+  right: 24px !important;
+  bottom: 24px !important;
+  z-index: 100000 !important;
+  width: auto !important;
+  padding: 12px 18px !important;
+  height: 56px !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Big overlay container (Streamlit container content will be rendered in place) */
+#oculaire-overlay-container {
+  position: fixed;
+  right: 24px;
+  bottom: 96px;
+  z-index: 99998;
+  width: 420px;
+  max-width: 92vw;
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98));
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  padding: 12px;
+  color: #e6faff;
+}
+
+/* Message styles inside the Streamlit container (we use HTMLs for messages below) */
+.oc-msg-user { align-self:flex-end; background: linear-gradient(90deg,#1b6cff,#4fd3ff); color:#021617; padding:10px 12px; border-radius:12px; margin-bottom:8px; display:inline-block; max-width:100%; }
+.oc-msg-assistant { align-self:flex-start; background: linear-gradient(90deg,#1b1137,#3a0e6a); color:#e6faff; padding:10px 12px; border-radius:12px; margin-bottom:8px; display:inline-block; max-width:100%; }
+
+/* Hide the default Streamlit footer for a cleaner look */
+footer { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
 # -----------------------
-# ask_glaucoma_assistant using MODEL_NAME for SDK and REST
+# Chatbot Function (kept from your code)
 # -----------------------
 def ask_glaucoma_assistant(question, history, api_key):
-    """Call Google Gemini (SDK if available, otherwise REST) using MODEL_NAME."""
+    """Call Google Gemini API with glaucoma-specific context"""
     if not api_key or not api_key.strip():
         return "⚠️ Please configure your Google Gemini API key (see sidebar)."
+    
+    # System prompt
+    system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
 
-    system_instruction = (
-        "You are a specialized medical AI assistant focused exclusively on glaucoma. "
-        "Answer only glaucoma/OCT/RNFLT-related questions concisely and include a short disclaimer "
-        "that this is educational information, not medical advice."
-    )
+Your role:
+- Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment
+- Provide accurate, evidence-based information about glaucoma
+- Explain medical terminology clearly
+- If asked about non-glaucoma topics, politely redirect to glaucoma-related questions
+- Keep responses concise and under 200 words
+- Always include a brief disclaimer that you're providing educational information, not medical advice
 
+Important: Always remind users to consult healthcare professionals for medical decisions."""
     try:
         if USE_SDK:
-            # SDK path
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(MODEL_NAME)
-            # Build small conversation history for context
+            model = genai.GenerativeModel('gemini-1.5-flash')
             chat_history = []
             for msg in history[-6:]:
                 role = "user" if msg["role"] == "user" else "model"
@@ -226,56 +201,50 @@ def ask_glaucoma_assistant(question, history, api_key):
             response = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
             return response.text
         else:
-            # REST path
             conversation_context = ""
             for msg in history[-6:]:
                 role = "User" if msg["role"] == "user" else "Assistant"
                 conversation_context += f"{role}: {msg['content']}\n\n"
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
-            # REST URL uses MODEL_NAME (must include models/)
-            url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
-
-            payload = {
-                "contents": [{"parts": [{"text": full_prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.7,
-                    "maxOutputTokens": 512
-                }
-            }
-            response = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=30)
+            # Use the gemini-1.5-flash-latest endpoint as fallback
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
+            response = requests.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [{"parts": [{"text": full_prompt}]}],
+                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1000}
+                },
+                timeout=30
+            )
             if response.status_code == 200:
                 data = response.json()
-                # Try common field structures defensively
                 try:
                     return data["candidates"][0]["content"]["parts"][0]["text"]
                 except Exception:
-                    try:
-                        # older/newer variants
-                        return data["candidates"][0]["content"][0]["text"]
-                    except Exception:
-                        return "❌ Unexpected API response format."
+                    return "❌ Unexpected API response format."
             elif response.status_code == 403:
-                return "🔑 API key invalid or restricted (403)."
+                return "🔑 API key invalid. Get a new key at https://aistudio.google.com/apikey"
             elif response.status_code == 404:
-                return "❌ API not accessible (404) — check model name and API access."
+                return "❌ API not accessible. Your key might be restricted. Try creating a new unrestricted key."
             else:
-                return f"❌ Error ({response.status_code}): {response.text[:300]}"
+                return f"❌ Error ({response.status_code}): {response.text[:200]}"
     except Exception as e:
-        return f"❌ Exception while calling assistant: {str(e)}"
+        return f"❌ Error: {str(e)}\n\nTip: Make sure your API key from https://aistudio.google.com/apikey is unrestricted."
 
 # -----------------------
 # Header
 # -----------------------
 st.markdown("""
-<div class="header">
-  <h1>👁️ OCULAIRE</h1>
-  <h3>AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</h3>
+<div style="text-align:center; margin-top:10px; margin-bottom:10px;">
+  <h1 style="font-size:34px; font-weight:900; margin:0; background: linear-gradient(90deg,#00f5ff,#ff40c4); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">👁️ OCULAIRE</h1>
+  <div style="color:var(--muted); margin-top:6px;">AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</div>
 </div>
 """, unsafe_allow_html=True)
 st.markdown("---")
 
 # -----------------------
-# Load Models (unchanged)
+# Load Models
 # -----------------------
 @st.cache_resource
 def load_models():
@@ -388,7 +357,7 @@ def render_severity(pct):
 # SIDEBAR - API Key Status
 # -----------------------
 with st.sidebar:
-    st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
+    st.markdown("<div style='font-weight:800; font-size:14px;'>🔑 API Status</div>", unsafe_allow_html=True)
     if API_KEY:
         st.success("✅ Gemini API Key configured")
         st.info("Using API key from secrets/environment")
@@ -417,7 +386,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # -----------------------
-# LAYOUT (RNFLT / B-Scan upload UI)
+# LAYOUT (RNFLT/B-Scan upload UI) — unchanged
 # -----------------------
 colA, colB = st.columns(2)
 
@@ -512,242 +481,110 @@ if rnflt_file or bscan_file:
 st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
-# --------------------------
-# BEATING PILL + FULL FANCY OVERLAY
-# --------------------------
+# -----------------------
+# Pure-Python Floating pill + overlay (no JS navigation)
+# -----------------------
 
-# Read query params
-query_params = st.experimental_get_query_params()
-open_chat = query_params.get("open_chat", ["0"])[0] in ("1", "true", "True")
-question_param = query_params.get("question", [None])[0]
-
-# Process question param server-side exactly once per question
-if question_param:
-    last_q = st.session_state.get("last_processed_q", None)
-    if question_param != last_q:
-        st.session_state["last_processed_q"] = question_param
-        st.session_state.chat_history.append({"role": "user", "content": question_param})
-        if API_KEY:
-            reply = ask_glaucoma_assistant(question_param, st.session_state.chat_history, API_KEY)
-        else:
-            reply = "❌ No API key configured. Add GEMINI_API_KEY to secrets or environment."
-        st.session_state.chat_history.append({"role": "assistant", "content": reply})
-        # Keep overlay open but avoid reprocessing the param repeatedly
-        st.experimental_set_query_params(open_chat="1")
-        st.experimental_rerun()
-
-# ===============================
-# FINAL FULL FANCY FLOATING WIDGET
-# ===============================
-
-floating_html = r'''
-<div id="oculaire-float-root">
-  <style>
-    /* pill container */
-    #oculaire-pill {
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      z-index: 200000;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 12px 20px;
-      border-radius: 999px;
-      background: linear-gradient(90deg,#00f5ff,#ff40c4);
-      box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 40px rgba(0,245,255,0.12);
-      cursor: pointer;
-      transform-origin: center;
-      animation: beat 1.6s infinite ease-in-out;
-      -webkit-user-select: none;
-      user-select: none;
-    }
-
-    @keyframes beat {
-      0% { transform: scale(1); }
-      50% { transform: scale(1.06); }
-      100% { transform: scale(1); }
-    }
-
-    #oculaire-pill .icon {
-      width: 38px; height: 38px; border-radius:50%;
-      background: white; display:flex; align-items:center; justify-content:center;
-      font-size: 18px; box-shadow: 0 4px 18px rgba(0,0,0,0.45);
-    }
-
-    #oculaire-pill .label {
-      font-weight: 800; font-size: 15px; color: white !important;
-      text-shadow: 0 0 6px rgba(0,0,0,0.6);
-      padding-right: 6px;
-    }
-
-    /* overlay */
-    #oculaire-overlay {
-      position: fixed;
-      bottom: 100px;
-      right: 24px;
-      z-index: 200001;
-      width: 420px;
-      max-width: 92vw;
-      border-radius: 14px;
-      overflow: hidden;
-      background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98));
-      border: 1px solid rgba(255,255,255,0.08);
-      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-      display: none;
-    }
-
-    #oculaire-overlay .hdr {
-      padding: 12px 14px; display:flex; justify-content:space-between; align-items:center;
-      background: rgba(255,255,255,0.02);
-    }
-
-    #oculaire-overlay .hdr .title { color: white; font-weight:800; font-size:16px; }
-
-    #oculaire-overlay .hdr .close-btn {
-      background:none; border:none; font-size:18px; color:white; cursor:pointer;
-    }
-
-    #oculaire-overlay .body {
-      padding: 16px 16px; max-height: 300px; overflow-y: auto; color: white;
-    }
-
-    #oculaire-overlay .footer {
-      padding: 12px 12px; display:flex; gap:8px; align-items:center;
-      background: rgba(255,255,255,0.01);
-    }
-
-    #oculaire-overlay input[type="text"] {
-      width: 100%;
-      padding:14px 14px;
-      border-radius:10px;
-      border:1px solid rgba(255,255,255,0.06);
-      background: rgba(255,255,255,0.02);
-      color:white;
-      outline:none;
-      font-size:15px;
-      height:44px;
-      box-sizing: border-box;
-    }
-
-    .oculaire-btn {
-      padding: 10px 14px; border-radius:10px; border:none;
-      cursor:pointer; font-weight:800; font-size:14px;
-    }
-
-    .oculaire-btn.send {
-      background: linear-gradient(90deg,#00f5ff,#ff40c4);
-      color:#021617;
-    }
-    .oculaire-btn.clear {
-      background:transparent;
-      color:white;
-      border:1px solid rgba(255,255,255,0.06);
-    }
-  </style>
-
-  <!-- Floating pill -->
-  <div id="oculaire-pill">
-    <div class="icon">💬</div>
-    <div class="label">Ask OCULAIRE</div>
-  </div>
-
-  <!-- Overlay -->
-  <div id="oculaire-overlay">
-    <div class="hdr">
-      <div class="title">🤖 OCULAIRE Assistant</div>
-      <button class="close-btn">✖</button>
-    </div>
-
-    <div class="body" id="oculaire-body">
-      <div id="oculaire-messages">
-        <div style="opacity:0.8; font-size:14px; margin-bottom:10px;">
-          Ask me anything about Glaucoma, OCT, RNFLT, or eye health…
-        </div>
-      </div>
-    </div>
-
-    <div class="footer">
-      <input id="oculaire-input" type="text" placeholder="Type your question…">
-      <button class="oculaire-btn send" id="oculaire-send">Send</button>
-      <button class="oculaire-btn clear" id="oculaire-clear">Clear</button>
-    </div>
-  </div>
-
-  <script>
-    (function(){
-      const pill = document.getElementById('oculaire-pill');
-      const overlay = document.getElementById('oculaire-overlay');
-      const closeBtn = document.querySelector('#oculaire-overlay .close-btn');
-      const sendBtn = document.getElementById('oculaire-send');
-      const clearBtn = document.getElementById('oculaire-clear');
-      const input = document.getElementById('oculaire-input');
-
-      // Open overlay
-      pill.addEventListener('click', function(){
-        overlay.style.display = 'block';
-        setTimeout(()=> input.focus(), 120);
-      });
-
-      // Close overlay
-      closeBtn.addEventListener('click', ()=> overlay.style.display = 'none');
-      clearBtn.addEventListener('click', ()=> {
-        input.value = '';
-        overlay.style.display = 'none';
-      });
-
-      // Show overlay if URL has open_chat
-      try {
-        const params = new URLSearchParams(window.location.search);
-        if (params.get('open_chat') === '1') {
-          overlay.style.display = 'block';
-        }
-      } catch(e){}
-
-      // =============== SEND BUTTON (Working Navigation) ===============
-      sendBtn.addEventListener('click', function(){
-        const q = (input.value || '').trim();
-        if (!q) { input.focus(); return; }
-
-        let url;
-        try { url = new URL(window.top.location.href); }
-        catch { url = new URL(window.location.href); }
-
-        url.searchParams.set("open_chat", "1");
-        url.searchParams.set("question", q);
-        const finalUrl = url.toString();
-        console.log("oculaire: navigating ->", finalUrl);
-
-        // 1) primary
-        try { window.top.location.href = finalUrl; return; } catch(e){}
-        // 2) parent
-        try { window.parent.location.href = finalUrl; return; } catch(e){}
-        // 3) anchor fallback
-        try {
-          const a = document.createElement('a');
-          a.href = finalUrl; a.target = "_top";
-          document.body.appendChild(a); a.click(); a.remove();
-          return;
-        } catch(e){}
-        // 4) window.open fallback
-        try { window.open(finalUrl, "_top"); return; } catch(e){}
-        // 5) last fallback
-        window.location.search = "?open_chat=1&question=" + encodeURIComponent(q);
-      });
-
-      // Enter key to send
-      input.addEventListener('keydown', function(e){
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          sendBtn.click();
-        }
-      });
-
-    })();
-  </script>
+# 1) Visual pill (HTML)
+st.markdown("""
+<div id="oculaire-pill-visual" role="button" aria-hidden="true">
+  <div class="icon">💬</div>
+  <div class="label">Ask OCULAIRE</div>
 </div>
-'''
+""", unsafe_allow_html=True)
 
-# Render widget
-components.html(floating_html, height=330)
+# 2) Transparent Streamlit button positioned over the pill (captures clicks in Python)
+# Use a unique label which we referenced in CSS: "OCULAIRE_OPEN_BTN"
+if st.button("OCULAIRE_OPEN_BTN", key="floating_pill_button"):
+    st.session_state.overlay_open = True
 
+# 3) Overlay container (shown when overlay_open=True)
+if st.session_state.overlay_open:
+    # We render the overlay inside a fixed-position wrapper using HTML + a Streamlit container for content
+    # The #oculaire-overlay-container styles are defined in the CSS above.
+    overlay_placeholder = st.empty()
+    with overlay_placeholder.container():
+        st.markdown('<div id="oculaire-overlay-container">', unsafe_allow_html=True)
+        # Header area
+        col1, col2 = st.columns([8,1])
+        with col1:
+            st.markdown("<div style='font-weight:800; font-size:16px;'>🤖 OCULAIRE Assistant</div>", unsafe_allow_html=True)
+        with col2:
+            if st.button("✖", key="overlay_close_btn"):
+                st.session_state.overlay_open = False
+                # Clear input field on close (optional)
+                if "floating_input" in st.session_state:
+                    st.session_state.pop("floating_input", None)
+        st.markdown("<hr style='margin:8px 0 12px 0; border-color: rgba(255,255,255,0.06)'>", unsafe_allow_html=True)
+
+        # Messages area: render recent chat history (as HTML blocks)
+        # We'll show last 10 messages
+        history = st.session_state.get("chat_history", [])
+        msgs_html = "<div style='display:flex; flex-direction:column; gap:6px; max-height:260px; overflow:auto; padding-bottom:8px;'>"
+        for msg in history[-12:]:
+            if msg["role"] == "user":
+                msgs_html += f"<div class='oc-msg-user'>You: {st.markdown(st.escape(msg['content'])) if False else st.html if False else msg['content']}</div>"
+            else:
+                msgs_html += f"<div class='oc-msg-assistant'>OCULAIRE: {msg['content']}</div>"
+        msgs_html += "</div>"
+        # Use unsafe HTML to ensure the styled message blocks render
+        st.markdown(msgs_html, unsafe_allow_html=True)
+
+        # Input row
+        text_col, send_col, clear_col = st.columns([8,1,1])
+        with text_col:
+            user_question = st.text_input(" ", key="floating_input", placeholder="Type your question about glaucoma, OCT, RNFLT...", label_visibility="collapsed")
+        with send_col:
+            if st.button("Send", key="floating_send_btn"):
+                # Only process if there is text
+                q = (st.session_state.get("floating_input") or "").strip()
+                if q:
+                    # append user message
+                    st.session_state.chat_history.append({"role": "user", "content": q})
+                    # call assistant (blocking) — you may want to show a spinner
+                    with st.spinner("🔍 Searching for answers..."):
+                        reply = ask_glaucoma_assistant(q, st.session_state.chat_history, API_KEY)
+                    st.session_state.chat_history.append({"role": "assistant", "content": reply})
+                    # clear input
+                    st.session_state.floating_input = ""
+                    # re-render overlay by doing nothing further (Streamlit reruns)
+        with clear_col:
+            if st.button("Clear", key="floating_clear_btn"):
+                st.session_state.chat_history = []
+                st.session_state.floating_input = ""
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# -----------------------
+# Also keep the bottom-right expander chat (optional fallback)
+# -----------------------
+# This replicates your earlier working expander — keep it as a fallback (optional)
+st.markdown('<div style="position:fixed; right:24px; bottom:12px; z-index:90000;">', unsafe_allow_html=True)
+with st.expander("💬 Ask Glaucoma Assistant (fallback)", expanded=False):
+    st.markdown("<div style='font-weight:800;'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
+    for msg in st.session_state.chat_history:
+        if msg["role"] == "user":
+            st.markdown(f"<div style='background: rgba(0,245,255,0.06); padding:8px; border-radius:8px; margin:6px 0;'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div style='background: rgba(255,64,196,0.06); padding:8px; border-radius:8px; margin:6px 0;'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+    # small input
+    small_q = st.text_input("Your question:", key="fallback_q", placeholder="e.g., What is glaucoma?", label_visibility="collapsed")
+    col1, col2 = st.columns([4,1])
+    with col1:
+        send_btn = st.button("📤 Send", key="fallback_send")
+    with col2:
+        cn_btn = st.button("🗑️", key="fallback_clear")
+    if send_btn and small_q:
+        if not API_KEY:
+            st.error("❌ API key not configured. See sidebar.")
+        else:
+            with st.spinner("🔍 Searching for answers..."):
+                response = ask_glaucoma_assistant(small_q, st.session_state.chat_history, API_KEY)
+                st.session_state.chat_history.append({"role":"user","content":small_q})
+                st.session_state.chat_history.append({"role":"assistant","content":response})
+                st.session_state.fallback_q = ""
+    if cn_btn:
+        st.session_state.chat_history = []
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# End of app.py
