@@ -68,7 +68,7 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — Neon Theme + Animations
+# CSS — Neon Theme + Animations (with neon/beating floating-expander)
 # -----------------------
 st.markdown("""
 <style>
@@ -180,61 +180,98 @@ st.markdown("""
   50% { box-shadow: 0 0 40px rgba(0,245,255,0.9), 0 0 60px rgba(255,64,196,0.8); }
 }
 
-/* Fixed button container */
+/* ---------- REPLACED floating-expander CSS WITH NEON/BEATING STYLES ---------- */
+
+/* Floating expander container (neon, subtle beat) */
 .floating-expander {
   position: fixed !important;
   bottom: 20px !important;
   right: 20px !important;
-  width: 400px !important;
+  width: 420px !important;
+  max-width: 92vw !important;
   z-index: 9999 !important;
-  box-shadow: 0 0 40px rgba(0,245,255,0.4), 0 0 60px rgba(255,64,196,0.3) !important;
   border-radius: 16px !important;
-  animation: float 3s ease-in-out infinite !important;
+  box-shadow: 0 10px 40px rgba(0,245,255,0.08), 0 8px 30px rgba(255,64,196,0.06) !important;
+  /* gentle floating + beat harmonized */
+  animation: float-slow 3.8s ease-in-out infinite, beat 1.8s ease-in-out infinite;
 }
 
-/* Style the expander */
+/* Container background for closed/ open panel */
 .floating-expander details {
-  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
-  border: 2px solid rgba(0,245,255,0.3) !important;
+  background: linear-gradient(180deg, rgba(6,10,24,0.98), rgba(2,2,8,0.98)) !important;
+  border: 2px solid rgba(0,245,255,0.14) !important;
   border-radius: 16px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
 }
 
+/* Neon summary pill (forced white label + beat glow) */
 .floating-expander details summary {
-  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
-  padding: 16px !important;
-  border-radius: 14px !important;
+  display:flex !important;
+  align-items:center !important;
+  gap:10px !important;
+  padding: 14px 16px !important;
+  margin: 8px !important;
+  border-radius: 12px !important;
   cursor: pointer !important;
   font-weight: 800 !important;
   font-size: 16px !important;
-  color: #e6faff !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
+  color: #ffffff !important;                      /* force white label */
+  background: linear-gradient(90deg, #00f5ff 8%, #7ef0ff 30%, #ff6ad6 70%, #ff40c4 100%) !important;
+  box-shadow: 0 8px 30px rgba(0,245,255,0.12), 0 6px 22px rgba(255,64,196,0.08);
+  -webkit-background-clip: padding-box;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  animation: neon-glow 2.6s ease-in-out infinite;
 }
 
+/* Slight pop on hover */
 .floating-expander details summary:hover {
-  background: linear-gradient(135deg, rgba(0,245,255,0.3), rgba(255,64,196,0.3)) !important;
-  box-shadow: 0 0 25px rgba(0,245,255,0.5) !important;
+  transform: translateY(-4px) scale(1.02) !important;
+  box-shadow: 0 14px 50px rgba(0,245,255,0.22), 0 10px 40px rgba(255,64,196,0.12) !important;
 }
 
-.floating-expander details[open] {
-  box-shadow: 0 0 50px rgba(0,245,255,0.6), 0 0 70px rgba(255,64,196,0.4) !important;
+/* When details is open, give stronger neon halo */
+.floating-expander details[open] summary {
+  box-shadow: 0 18px 70px rgba(0,245,255,0.26), 0 14px 60px rgba(255,64,196,0.16) !important;
 }
 
-/* Floating Chat Expander at Bottom */
-.floating-expander {
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 20px !important;
-  width: 450px !important;
-  max-width: 90vw !important;
-  z-index: 9999 !important;
-  animation: float 3s ease-in-out infinite !important;
+/* smaller responsive */
+@media (max-width: 480px) {
+  .floating-expander { right: 12px !important; bottom: 12px !important; width: 92vw !important; }
+  .floating-expander details summary { font-size: 15px !important; padding: 12px 14px !important; margin: 6px !important; }
+}
+
+/* ---------- Animations ---------- */
+
+/* slow float */
+@keyframes float-slow {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+  100% { transform: translateY(0px); }
+}
+
+/* subtle beat (scale + glow) */
+@keyframes beat {
+  0% { transform: scale(1); filter: drop-shadow(0 0 10px rgba(0,245,255,0.06)); }
+  30% { transform: scale(1.03); filter: drop-shadow(0 0 22px rgba(0,245,255,0.16)); }
+  60% { transform: scale(1.01); filter: drop-shadow(0 0 14px rgba(255,64,196,0.12)); }
+  100% { transform: scale(1); filter: drop-shadow(0 0 10px rgba(0,245,255,0.06)); }
+}
+
+/* gentle neon color pulse for the summary background */
+@keyframes neon-glow {
+  0% { filter: saturate(1) brightness(1); }
+  50% { filter: saturate(1.12) brightness(1.04); }
+  100% { filter: saturate(1) brightness(1); }
 }
 
 @keyframes float {
   0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-8px); }
+  50% { transform: translateY(-10px); }
+}
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5); }
+  50% { box-shadow: 0 0 40px rgba(0,245,255,0.9), 0 0 60px rgba(255,64,196,0.8); }
 }
 
 footer { visibility:hidden; }
