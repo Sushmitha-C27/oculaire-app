@@ -1,4 +1,4 @@
-# app.py — OCULAIRE Neon Lab v5 (final fixed)
+# app.py — OCULAIRE Neon Lab v5 (severity bar updated: longer + faster beat)
 import streamlit as st
 import numpy as np
 import joblib
@@ -68,7 +68,7 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — Neon Theme + Beating Floating Expander (RELIABLE SELECTORS)
+# CSS — Neon Theme + faster-beating severity bar
 # -----------------------
 st.markdown("""
 <style>
@@ -93,162 +93,72 @@ st.markdown("""
 .metric-label { color:var(--muted); font-size:12px; }
 .large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.5); }
 
-/* severity */
-.sev-wrap{margin-top:16px;}
-.sev-outer{height:18px;width:100%;background:rgba(255,255,255,0.05);border-radius:14px;overflow:hidden;}
-.sev-inner{height:100%;width:0%;background:linear-gradient(90deg,var(--neonA),var(--neonB));border-radius:14px;transition:width 1s ease-in-out;}
-.sev-chip{margin-top:6px;display:inline-block;padding:6px 12px;border-radius:12px;font-weight:800;font-size:14px;color:#021617;background:linear-gradient(90deg, rgba(0,245,255,0.95), rgba(255,64,196,0.95));}
+/* severity - UPDATED: longer bar and faster beat */
+.sev-wrap { margin-top:18px; display:flex; justify-content:center; align-items:center; gap:12px; flex-direction:column; }
+.sev-outer {
+  height: 24px;               /* slightly taller */
+  width: 80%;                 /* LONG bar across page */
+  min-width: 420px;           /* ensure visible on wide screens */
+  max-width: 1100px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.04);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+}
+.sev-inner {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--neonA), var(--neonB));
+  border-radius: 16px;
+  box-shadow: 0 0 30px rgba(0,245,255,0.6), 0 0 40px rgba(255,64,196,0.5);
+  transition: width 0.9s cubic-bezier(.22,.9,.04,1); /* faster */
+  animation: sev-pulse 0.9s infinite ease-in-out;    /* faster beat */
+  transform-origin: left center;
+}
 
-/* chat */
+/* pulsing chip displayed on top of bar */
+.sev-chip {
+  display:inline-block;
+  padding:8px 14px;
+  border-radius:18px;
+  font-weight:900;
+  font-size:14px;
+  color:#021617;
+  background: linear-gradient(90deg, rgba(0,245,255,0.98), rgba(255,64,196,0.98));
+  box-shadow: 0 6px 30px rgba(0,245,255,0.25), 0 6px 30px rgba(255,64,196,0.18);
+  animation: chip-beat 0.9s infinite ease-in-out;   /* sync with inner */
+}
+
+/* faster keyframes */
+@keyframes sev-pulse {
+  0%   { transform: scaleX(1) translateZ(0); filter: drop-shadow(0 0 8px rgba(0,245,255,0.35)); }
+  50%  { transform: scaleX(1.01) translateZ(0); filter: drop-shadow(0 0 18px rgba(0,245,255,0.55)); }
+  100% { transform: scaleX(1) translateZ(0); filter: drop-shadow(0 0 8px rgba(0,245,255,0.35)); }
+}
+@keyframes chip-beat {
+  0% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-4px) scale(1.02); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* center alignment helpers */
+.sev-container {
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  width:100%;
+}
+
+/* responsive smaller screens */
+@media (max-width: 700px) {
+  .sev-outer { width: 92%; min-width: unset; }
+  .sev-chip { font-size:13px; padding:7px 12px; }
+}
+
+/* other app styles (kept) */
 .user-msg{background: linear-gradient(135deg, rgba(0,245,255,0.15), rgba(0,245,255,0.05));padding:12px;border-radius:8px;margin:8px 0;border-left:3px solid var(--neonA);}
 .assistant-msg{background: linear-gradient(135deg, rgba(255,64,196,0.15), rgba(255,64,196,0.05));padding:12px;border-radius:8px;margin:8px 0;border-left:3px solid var(--neonB);}
-
-/* ----------------- FLOATING EXPANDER (NEON, BEATING) ----------------- */
-.floating-expander{
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 20px !important;
-  width: 440px !important;
-  max-width: 92vw !important;
-  z-index: 99999 !important;
-  border-radius: 16px !important;
-  animation: float-slow 3.6s ease-in-out infinite;
-}
-
-/* wrapper path targeting the actual details rendered by Streamlit reliably */
-.floating-expander > div > details {
-  background: linear-gradient(180deg, rgba(6,10,24,0.96), rgba(2,2,8,0.96)) !important;
-  border: 2px solid rgba(0,245,255,0.55) !important;
-  border-radius: 16px !important;
-  overflow: hidden !important;
-  padding: 0 !important;
-  animation: neon-beat 2.1s ease-in-out infinite;
-}
-
-/* Summary bar — neon, forced white text */
-.floating-expander > div > details > summary {
-  display:flex !important;
-  align-items:center !important;
-  gap:12px !important;
-  padding: 14px 16px !important;
-  margin: 10px !important;
-  border-radius: 12px !important;
-  cursor: pointer !important;
-  font-weight: 900 !important;
-  font-size: 17px !important;
-  color: #ffffff !important;
-  background: linear-gradient(90deg, rgba(0,245,255,0.95), rgba(0,200,255,0.95), rgba(255,64,196,0.95)) !important;
-  text-shadow: 0 0 12px rgba(0,0,0,0.7);
-  box-shadow: 0 10px 40px rgba(0,245,255,0.45), 0 10px 45px rgba(255,64,196,0.35);
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
-}
-
-/* add a pulsing icon */
-/* ----------------- ROBUST NEON EXPANDER STYLES (covers multiple Streamlit DOM shapes) ----------------- */
-
-/* container */
-.floating-expander {
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 20px !important;
-  width: 440px !important;
-  max-width: 92vw !important;
-  z-index: 99999 !important;
-  pointer-events: auto !important;
-}
-
-/* target multiple possible detail/summary placements that Streamlit might render */
-.floating-expander details,
-.floating-expander > div > details,
-.floating-expander div details,
-.floating-expander summary,
-.floating-expander > div > summary,
-.floating-expander div summary {
-  box-sizing: border-box !important;
-}
-
-/* the neon card wrapper (applies to whichever details element exists) */
-.floating-expander details,
-.floating-expander > div > details,
-.floating-expander div details {
-  background: linear-gradient(180deg, rgba(6,10,24,0.98), rgba(2,2,8,0.98)) !important;
-  border: 2px solid rgba(0,245,255,0.75) !important;
-  border-radius: 18px !important;
-  padding: 6px !important;
-  box-shadow: 0 30px 90px rgba(0,245,255,0.12), 0 30px 120px rgba(255,64,196,0.08) !important;
-  animation: neon-beat 2.0s ease-in-out infinite !important;
-}
-
-/* Neon gradient summary (the clickable bar) — wide selection to ensure target */
-.floating-expander summary,
-.floating-expander > div > details > summary,
-.floating-expander div summary,
-.floating-expander > div > summary {
-  display: flex !important;
-  align-items: center !important;
-  gap: 12px !important;
-  padding: 14px 18px !important;
-  margin: 10px !important;
-  border-radius: 14px !important;
-  cursor: pointer !important;
-
-  /* BRIGHT NEON gradient, forced */
-  background: linear-gradient(90deg, rgba(0,245,255,1), rgba(72,200,255,1) 40%, rgba(255,64,196,1) 100%) !important;
-  color: #ffffff !important;
-  font-weight: 900 !important;
-  font-size: 17px !important;
-  text-shadow: 0 0 10px rgba(0,0,0,0.6) !important;
-  box-shadow: 0 12px 48px rgba(0,245,255,0.45) !important;
-  -webkit-text-fill-color: white !important;
-  -webkit-background-clip: none !important;
-}
-
-/* Force any icon/text inside to be white and visible */
-.floating-expander summary * {
-  color: #fff !important;
-  fill: #fff !important;
-}
-
-/* add pulsing icon before the label */
-.floating-expander summary::before,
-.floating-expander > div > details > summary::before,
-.floating-expander div summary::before {
-  content: "💬" !important;
-  font-size: 22px !important;
-  margin-right: 6px !important;
-  display: inline-block !important;
-  animation: pulse-icon 1.6s ease-in-out infinite !important;
-}
-
-/* hover */
-.floating-expander summary:hover,
-.floating-expander > div > details > summary:hover {
-  transform: translateY(-4px) scale(1.02) !important;
-  box-shadow: 0 22px 80px rgba(0,245,255,0.7), 0 20px 60px rgba(255,64,196,0.6) !important;
-}
-
-/* opened state stronger glow */
-.floating-expander details[open] summary,
-.floating-expander > div > details[open] summary {
-  box-shadow: 0 30px 120px rgba(0,245,255,0.85), 0 30px 140px rgba(255,64,196,0.75) !important;
-}
-
-/* animations */
-@keyframes neon-beat {
-  0%,100% { box-shadow: 0 0 30px rgba(0,245,255,0.45), 0 0 50px rgba(255,64,196,0.35); }
-  50%  { box-shadow: 0 0 70px rgba(0,245,255,0.95), 0 0 110px rgba(255,64,196,0.85); }
-}
-@keyframes pulse-icon { 0% { transform: scale(1); } 50% { transform: scale(1.18); } 100% { transform: scale(1); } }
-
-/* responsive shrink */
-@media (max-width: 480px) {
-  .floating-expander { right: 12px !important; bottom: 12px !important; width: 92vw !important; }
-  .floating-expander summary { padding: 10px 12px !important; font-size: 15px !important; margin: 8px !important; }
-}
-
-/* ensure forced visibility on top of everything (extreme) */
-.floating-expander, .floating-expander * { z-index: 2147483647 !important; pointer-events: auto !important; }
-
 
 /* hide streamlit footer (optional) */
 footer { visibility: hidden; }
@@ -424,18 +334,30 @@ def create_pdf(figs):
     buf.seek(0)
     return buf.getvalue()
 
+# -----------------------
+# render_severity (updated to use larger, centered bar + JS sets width quickly)
+# -----------------------
 def render_severity(pct):
     pct = max(0.0, min(100.0, float(pct)))
     html = f"""
     <div class='sev-wrap'>
-      <div class='sev-outer'><div id='sev_inner' class='sev-inner'></div></div>
-      <div style='text-align:center'><div class='sev-chip'>{pct:.1f}%</div></div>
+      <div class='sev-container'>
+        <div class='sev-outer'><div id='sev_inner' class='sev-inner'></div></div>
+      </div>
+      <div style='text-align:center'>
+        <div class='sev-chip'>{pct:.1f}%</div>
+      </div>
     </div>
     <script>
-      setTimeout(function(){{
-        var el=document.getElementById('sev_inner');
-        if(el) el.style.width='{pct:.1f}%';
-      }},150);
+      // set width and animate
+      (function(){{
+        var el = document.getElementById('sev_inner');
+        if (!el) return;
+        // small delay so CSS & layout settle
+        setTimeout(function(){{
+          el.style.width = '{pct:.1f}%';
+        }}, 50);
+      }})();
     </script>
     """
     return html
@@ -564,7 +486,7 @@ st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# FLOATING CHAT EXPANDER — label changed to "💬 Ask AI assistant" (NEON)
+# FLOATING CHAT EXPANDER — label changed to "💬 Ask AI assistant"
 # -----------------------
 st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
 with st.expander("💬 Ask AI assistant", expanded=False):
@@ -595,7 +517,6 @@ with st.expander("💬 Ask AI assistant", expanded=False):
                 response = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
                 st.session_state.chat_history.append({"role": "user", "content": user_question})
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
-                # rerun replaced (streamlit removed experimental API)
                 st.rerun()
 
     if clear_btn:
