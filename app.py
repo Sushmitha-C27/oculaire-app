@@ -1,8 +1,4 @@
-# app.py — OCULAIRE Neon Lab v6 (Gemini flash-only, Streamlit-only floating chat)
-# Run: streamlit run app.py
-
 import streamlit as st
-import streamlit.components.v1 as components
 import numpy as np
 import joblib
 import tensorflow as tf
@@ -16,7 +12,7 @@ import requests
 import json
 import time
 
-# Try to import google.generativeai SDK; if not available we'll use REST fallback.
+# Try to import google.generativeai, fallback to requests
 try:
     import google.generativeai as genai
     USE_SDK = True
@@ -31,23 +27,21 @@ st.set_page_config(page_title="OCULAIRE: Neon Glaucoma Detection Dashboard",
                    page_icon="👁️")
 
 # -----------------------
-# Session state init
+# Session State
 # -----------------------
-if "chat_history" not in st.session_state:
+if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
-if "last_processed_q" not in st.session_state:
+if 'last_processed_q' not in st.session_state:
     st.session_state.last_processed_q = None
 
 # -----------------------
-# Helpers: get API key
+# API Key helper
 # -----------------------
 def get_api_key():
-    # Try Streamlit secrets first (for deployment)
     try:
         return st.secrets["GEMINI_API_KEY"]
     except Exception:
         pass
-    # Try environment variable (for local dev)
     env_key = os.getenv("GEMINI_API_KEY")
     if env_key:
         return env_key
@@ -56,12 +50,7 @@ def get_api_key():
 API_KEY = get_api_key()
 
 # -----------------------
-# Display config
-# -----------------------
-display_width = 640  # width for B-scan preview and overlay
-
-# -----------------------
-# Matplotlib neon style
+# Matplotlib / Theme
 # -----------------------
 plt.style.use('dark_background')
 plt.rcParams.update({
@@ -77,7 +66,7 @@ plt.rcParams.update({
 })
 
 # -----------------------
-# CSS — neon, expanded severity bar & floating expander neon look
+# CSS — full-width patch + neon severity bar + other styles
 # -----------------------
 st.markdown("""
 <style>
@@ -88,191 +77,231 @@ st.markdown("""
   --neonB:#ff40c4;
   --muted:#a4b1c9;
 }
+
+/* ------------------------------------------------------------------
+   CRITICAL: override Streamlit's block-container sizing so our
+   severity bar can span the page. This lets .sev-outer be full width.
+   ------------------------------------------------------------------ */
+.block-container {
+  max-width: 98% !important;
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
+}
+
+/* general app */
 .stApp {
   background: radial-gradient(circle at 20% 20%, #091133, #020208 90%);
   color: #e6faff;
   font-family: 'Plus Jakarta Sans', Inter, system-ui;
 }
-/* Header */
 .header { text-align:center; margin-top:10px; margin-bottom:10px; }
-.header h1 { font-size:42px; font-weight:900; letter-spacing:3px;
+.header h1 {
+  font-size:42px; font-weight:900; letter-spacing:3px;
   background: linear-gradient(90deg, var(--neonA), var(--neonB));
   -webkit-background-clip:text; -webkit-text-fill-color:transparent;
   text-shadow: 0 0 20px rgba(0,245,255,0.8), 0 0 35px rgba(255,64,196,0.5);
 }
 .header h3 { color:var(--muted); font-weight:400; font-size:15px; }
 
-/* Card */
+/* card */
 .card {
   background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
   border:1px solid rgba(255,255,255,0.05);
   box-shadow: 0 0 25px rgba(0,245,255,0.05), 0 0 35px rgba(255,64,196,0.05);
   border-radius:12px; padding:16px;
 }
+.metric-label { color:var(--muted); font-size:12px; }
+.large-metric { font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 15px rgba(0,245,255,0.5); }
 
-/* Severity bar: longer and faster beat */
-.sev-wrap { margin-top:16px; }
-.sev-outer { height:18px; width:92%; margin: 0 auto; background: rgba(255,255,255,0.03); border-radius:14px; overflow:hidden; }
+/* ===========================================
+   SEVERITY BAR (FULL WIDTH + NEON BEAT)
+   =========================================== */
+.sev-wrap {
+  margin-top: 18px;
+  width: 100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-direction:column;
+}
+.sev-outer {
+  height: 26px;
+  width: 100% !important;         /* allow full-page width via .block-container override */
+  background: rgba(255,255,255,0.03);
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.05);
+  overflow: hidden;
+  min-width: 280px;
+  max-width: 1400px;
+}
 .sev-inner {
-  height:100%; width:0%;
-  background: linear-gradient(90deg,var(--neonA),var(--neonB));
-  border-radius:14px;
-  box-shadow: 0 0 25px rgba(0,245,255,0.6), 0 0 25px rgba(255,64,196,0.5);
-  transition: width 0.6s ease-in-out;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--neonA), var(--neonB));
+  border-radius: 18px;
+  transition: width 0.9s cubic-bezier(.22,.9,.04,1);
+  animation: sev-beat 0.9s infinite ease-in-out;
+  box-shadow: 0 0 35px rgba(0,245,255,0.7), 0 0 45px rgba(255,64,196,0.6);
+  transform-origin: left center;
 }
+@keyframes sev-beat {
+  0% { transform: scaleX(1) }
+  50% { transform: scaleX(1.02) }
+  100% { transform: scaleX(1) }
+}
+
+/* Chip (percentage) — floats below center by default */
 .sev-chip {
-  margin-top:10px; display:inline-block;
-  padding:10px 16px; border-radius:20px;
-  font-weight:800; font-size:15px; color:#021617;
-  background: linear-gradient(90deg, rgba(0,245,255,0.95), rgba(255,64,196,0.95));
-  box-shadow: 0 0 40px rgba(0,245,255,0.25), 0 0 50px rgba(255,64,196,0.2);
-  animation: pulse 0.8s infinite;
+  margin-top: 10px;
+  padding: 8px 16px;
+  font-size: 15px;
+  font-weight: 900;
+  border-radius: 20px;
+  background: linear-gradient(90deg, var(--neonA), var(--neonB));
+  color: #021617;
+  box-shadow: 0 6px 30px rgba(0,245,255,0.25), 0 6px 30px rgba(255,64,196,0.18);
+  animation: chip-beat 0.9s infinite ease-in-out;
 }
-@keyframes pulse { 0%{transform:scale(1);} 50%{transform:scale(1.08);} 100%{transform:scale(1);} }
+@keyframes chip-beat {
+  0% { transform: translateY(0) scale(1) }
+  50% { transform: translateY(-4px) scale(1.02) }
+  100% { transform: translateY(0) scale(1) }
+}
 
-/* Floating expander neon style (summary label changed later) */
-.floating-expander {
-  position: fixed !important;
-  bottom: 20px !important;
-  right: 20px !important;
-  width: 460px !important;
-  max-width: 92vw !important;
-  z-index: 9999 !important;
-  animation: float 3s ease-in-out infinite !important;
-  border-radius: 16px !important;
+/* small screens adjustments */
+@media (max-width: 700px) {
+  .sev-outer { width: 92% !important; max-width: 720px; }
+  .sev-chip { font-size: 13px; padding: 7px 12px; }
 }
-@keyframes float { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-8px);} }
 
-.floating-expander details {
-  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
-  border: 2px solid rgba(0,245,255,0.25) !important;
-  border-radius: 16px !important;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.6);
-}
-.floating-expander details summary {
-  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
-  padding: 14px !important;
-  border-radius: 12px !important;
-  cursor: pointer !important;
-  font-weight: 800 !important;
-  font-size: 16px !important;
-  color: #e6faff !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-}
-.floating-expander details summary::before { content: "💬"; font-size:20px; margin-right:8px; }
-
-/* Chat message styling */
+/* chat & expander styles (kept neon-friendly) */
 .user-msg {
-  background: linear-gradient(135deg, rgba(0,245,255,0.06), rgba(0,245,255,0.02));
+  background: linear-gradient(135deg, rgba(0,245,255,0.15), rgba(0,245,255,0.05));
   border-left: 3px solid var(--neonA);
   padding: 12px;
   border-radius: 8px;
   margin: 8px 0;
 }
 .assistant-msg {
-  background: linear-gradient(135deg, rgba(255,64,196,0.06), rgba(255,64,196,0.02));
+  background: linear-gradient(135deg, rgba(255,64,196,0.15), rgba(255,64,196,0.05));
   border-left: 3px solid var(--neonB);
   padding: 12px;
   border-radius: 8px;
   margin: 8px 0;
 }
 
-/* Buttons */
-.stButton>button {
-  border-radius: 10px;
-  padding: 8px 12px;
-  font-weight:800;
+/* floating expander neon visuals */
+.floating-expander details {
+  background: linear-gradient(180deg, rgba(10,15,37,0.98), rgba(2,2,8,0.98)) !important;
+  border: 2px solid rgba(0,245,255,0.35) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+.floating-expander details summary {
+  background: linear-gradient(135deg, rgba(0,245,255,0.2), rgba(255,64,196,0.2)) !important;
+  padding: 12px !important;
+  border-radius: 12px !important;
+  font-weight: 800 !important;
+  font-size: 16px !important;
+  color: #e6faff !important;
+  display:flex !important;
+  align-items:center !important;
+  gap:8px !important;
+}
+.floating-expander details summary::before {
+  content: "💬";
+  font-size: 22px;
+  margin-right:8px;
 }
 
-/* Hide default footer */
+/* hide footer */
 footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
 
 # -----------------------
-# Chat assistant function (flash-only)
+# Model selectors / name
 # -----------------------
-# SDK model name and REST model name
-SDK_MODEL = "gemini-1.5-flash"
-REST_MODEL = "gemini-1.5-flash-latest"
+MODEL_NAME = "models/gemini-2.5-pro"
 
+# -----------------------
+# Chatbot Function
+# -----------------------
 def ask_glaucoma_assistant(question, history, api_key):
-    """
-    Call Gemini (flash) with glaucoma-specific context.
-    Uses SDK if available and configured, otherwise REST fallback.
-    Returns assistant text or an error message string.
-    """
+    """Call Google Gemini API with glaucoma-specific context"""
     if not api_key or not api_key.strip():
         return "⚠️ Please configure your Google Gemini API key (see sidebar)."
 
-    system_instruction = (
-        "You are a specialized medical AI assistant focused exclusively on glaucoma. "
-        "Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, "
-        "optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment. "
-        "Provide clear, concise educational information (<=200 words) and a brief disclaimer "
-        "that you are not a substitute for professional medical advice."
-    )
+    system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
 
-    # keep a short window of history for context
-    ctx = history[-6:] if history else []
+Your role:
+- Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment
+- Provide accurate, evidence-based information about glaucoma
+- Explain medical terminology clearly
+- If asked about non-glaucoma topics, politely redirect to glaucoma-related questions
+- Keep responses concise and under 200 words
+- Always include a brief disclaimer that you're providing educational information, not medical advice
 
+Important: Always remind users to consult healthcare professionals for medical decisions."""
     try:
         if USE_SDK:
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(SDK_MODEL)
+            model = genai.GenerativeModel(MODEL_NAME)
             chat_history = []
-            for msg in ctx:
+            for msg in history[-6:]:
                 role = "user" if msg["role"] == "user" else "model"
                 chat_history.append({"role": role, "parts": [msg["content"]]})
             chat = model.start_chat(history=chat_history)
             response = chat.send_message(f"{system_instruction}\n\nUser question: {question}")
             return response.text
         else:
-            # REST fallback
             conversation_context = ""
-            for msg in ctx:
+            for msg in history[-6:]:
                 role = "User" if msg["role"] == "user" else "Assistant"
                 conversation_context += f"{role}: {msg['content']}\n\n"
             full_prompt = f"{system_instruction}\n\n{conversation_context}User: {question}\n\nAssistant:"
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{REST_MODEL}:generateContent?key={api_key}"
-            payload = {
-                "contents": [{"parts": [{"text": full_prompt}]}],
-                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 400}
-            }
-            resp = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=30)
-            if resp.status_code == 200:
-                data = resp.json()
-                # safe navigation
-                try:
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
-                except Exception:
-                    return "❌ Unexpected API response shape."
-            elif resp.status_code == 429:
-                return "❌ API Error 429: Quota exceeded. Try again later or switch API key."
-            elif resp.status_code == 403:
-                return "🔑 API key invalid or restricted. Check restrictions and permissions."
-            elif resp.status_code == 404:
-                return "❌ API endpoint not found (404)."
+            url = f"https://generativelanguage.googleapis.com/v1beta/{MODEL_NAME}:generateContent?key={api_key}"
+            response = requests.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                json={
+                    "contents": [{"parts": [{"text": full_prompt}]}],
+                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1000}
+                },
+                timeout=30
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            elif response.status_code == 403:
+                return "🔑 API key invalid. Get a new key at https://aistudio.google.com/apikey"
+            elif response.status_code == 404:
+                return "❌ API not accessible. Your key might be restricted. Try creating a new unrestricted key."
             else:
-                return f"❌ API Error {resp.status_code}: {resp.text[:300]}"
+                return f"❌ Error ({response.status_code}): {response.text[:200]}"
     except Exception as e:
-        return f"❌ Error calling assistant: {str(e)}"
+        return f"❌ Error: {str(e)}"
 
 # -----------------------
-# Load models/resources (cached)
+# Header markup
+# -----------------------
+st.markdown("""
+<div class="header">
+  <h1>👁️ OCULAIRE</h1>
+  <h3>AI-Powered Glaucoma Detection Dashboard — Neon Lab v5</h3>
+</div>
+""", unsafe_allow_html=True)
+st.markdown("---")
+
+# -----------------------
+# Load Models (cache)
 # -----------------------
 @st.cache_resource
 def load_models():
-    b_model = None
-    scaler = kmeans = avg_healthy = avg_glaucoma = thin_cluster = None
-    # try load bscan model (optional)
     try:
         b_model = tf.keras.models.load_model("bscan_cnn.h5", compile=False)
     except Exception:
         b_model = None
-    # try load RNFLT resources (optional)
     try:
         scaler = joblib.load("rnflt_scaler.joblib")
         kmeans = joblib.load("rnflt_kmeans.joblib")
@@ -286,42 +315,37 @@ def load_models():
 b_model, scaler, kmeans, avg_healthy, avg_glaucoma, thin_cluster = load_models()
 
 # -----------------------
-# Helper functions (NPZ/image support)
+# Helpers (processing)
 # -----------------------
-def process_npz_file(file_like):
+def process_npz(f):
     try:
-        buf = io.BytesIO(file_like.getvalue())
+        buf = io.BytesIO(f.getvalue())
         data = np.load(buf, allow_pickle=True)
-        if "volume" in data:
-            arr = data["volume"]
-        else:
-            arr = data[data.files[0]]
-        # if 3D, take first slice (typical for RNFLT maps)
+        arr = data["volume"] if "volume" in data else data[data.files[0]]
         if arr.ndim == 3:
             arr = arr[0, :, :]
         vals = arr.flatten().astype(float)
-        metrics = {"mean": np.nanmean(vals), "std": np.nanstd(vals), "min": np.nanmin(vals), "max": np.nanmax(vals)}
-        return arr, metrics
+        m = {"mean": np.nanmean(vals), "std": np.nanstd(vals), "min": np.nanmin(vals), "max": np.nanmax(vals)}
+        return arr, m
     except Exception as e:
-        st.error(f"NPZ read error: {e}")
+        st.error(f"Error reading NPZ: {e}")
         return None, None
 
-def process_image_rnflt(file_like):
-    try:
-        image = Image.open(file_like).convert("L")
-        arr = np.array(image).astype(float)
-        vals = arr.flatten()
-        metrics = {"mean": float(np.nanmean(vals)), "std": float(np.nanstd(vals)), "min": float(np.nanmin(vals)), "max": float(np.nanmax(vals))}
-        return arr, metrics, image
-    except Exception as e:
-        st.error(f"RNFLT image read error: {e}")
-        return None, None, None
+def compute_risk_map(rnflt, healthy, threshold=-10):
+    if rnflt.shape != healthy.shape:
+        healthy = cv2.resize(healthy, (rnflt.shape[1], rnflt.shape[0]))
+    diff = rnflt - healthy
+    risk = np.where(diff < threshold, diff, np.nan)
+    total = np.isfinite(diff).sum()
+    risky = np.isfinite(risk).sum()
+    severity = (risky / total) * 100 if total else 0
+    return diff, risk, severity
 
-def preprocess_bscan(image_pil, size=(320,320)):
-    arr = np.array(image_pil.convert('L')).astype(np.float32)
+def preprocess_bscan(image_pil, size=(224,224)):
+    arr = np.array(image_pil.convert('L'))
     arr = np.clip(arr, 0, np.percentile(arr, 99))
     arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-6)
-    arr_res = cv2.resize(arr, size, interpolation=cv2.INTER_LINEAR)
+    arr_res = cv2.resize(arr, size, interpolation=cv2.INTER_NEAREST)
     arr_rgb = np.repeat(arr_res[..., None], 3, axis=-1)
     batch = np.expand_dims(arr_rgb, axis=0).astype(np.float32)
     return batch, arr_res
@@ -363,88 +387,61 @@ def create_pdf(figs):
     buf.seek(0)
     return buf.getvalue()
 
-def render_severity_html(pct):
+# -----------------------
+# Severity renderer (HTML + JS sets width)
+# -----------------------
+def render_severity(pct):
     pct = max(0.0, min(100.0, float(pct)))
     html = f"""
     <div class='sev-wrap'>
       <div class='sev-outer'><div id='sev_inner' class='sev-inner'></div></div>
-      <div style='text-align:center'><div class='sev-chip'>{pct:.1f}%</div></div>
+      <div class='sev-chip'>{pct:.1f}%</div>
     </div>
     <script>
-      (function(){{
-        setTimeout(function(){{
-          var el=document.getElementById('sev_inner');
-          if(el) el.style.width='{pct:.1f}%';
-        }},80);
-      }})();
+      // small delay to ensure layout ready, then set width
+      setTimeout(function(){{
+        var el = document.getElementById('sev_inner');
+        if (el) el.style.width = '{pct:.1f}%';
+      }}, 60);
     </script>
     """
     return html
 
 # -----------------------
-# Sidebar: RNFLT input type & converter UI
+# Sidebar (API status + instructions)
 # -----------------------
-st.sidebar.title("RNFLT Input & Tools")
-rnflt_input_mode = st.sidebar.radio("RNFLT input type", ["NPZ (recommended)", "Image (single RNFLT image)"])
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("Image → NPZ converter")
-st.sidebar.markdown("If you only have RNFLT slice images, upload a sequence (PNG/JPG). I'll pack them into a `volume` and let you download `.npz`.")
-conv_files = st.sidebar.file_uploader("Upload RNFLT slice images (ordered)", accept_multiple_files=True, type=["png","jpg","jpeg"])
-if conv_files:
-    if st.sidebar.button("Convert to .npz and download"):
-        try:
-            stacks = []
-            for f in conv_files:
-                im = Image.open(f).convert("L")
-                arr = np.array(im).astype(np.float32)
-                stacks.append(arr)
-            vol = np.stack(stacks, axis=0)  # shape (N, H, W)
-            buf = io.BytesIO()
-            np.savez_compressed(buf, volume=vol)
-            buf.seek(0)
-            st.sidebar.success(f"Packed {len(stacks)} slices into volume with shape {vol.shape}")
-            st.sidebar.download_button("⬇️ Download RNFLT volume (.npz)", data=buf.getvalue(), file_name="rnflt_volume.npz", mime="application/octet-stream")
-        except Exception as e:
-            st.sidebar.error(f"Conversion error: {e}")
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("⚠️ Use NPZ if possible for full RNFLT maps. Images are supported but may lose metadata.")
-st.sidebar.markdown(f"🔑 API key: {'configured' if API_KEY else 'not configured'}")
+with st.sidebar:
+    st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
+    if API_KEY:
+        st.success("✅ Gemini API Key configured")
+        st.info("Using API key from secrets/environment")
+    else:
+        st.error("❌ No API Key found")
+        st.warning("Chatbot will not work without an API key")
+    st.markdown("---")
+    st.markdown("""
+    <div style='font-size:12px; color:var(--muted);'>
+    <strong>How to configure Gemini API key:</strong><br><br>
+    <strong>For Streamlit Cloud:</strong><br>
+    1. Go to your app settings<br>
+    2. Add to Secrets:<br>
+    <code>GEMINI_API_KEY = "your-key-here"</code><br><br>
+    <strong>For Local Development:</strong><br>
+    1. Create <code>.streamlit/secrets.toml</code><br>
+    2. Add: <code>GEMINI_API_KEY = "your-key-here"</code><br>
+    3. Or set environment variable:<br>
+    <code>export GEMINI_API_KEY="your-key-here"</code><br><br>
+    </div>
+    """, unsafe_allow_html=True)
 
 # -----------------------
-# Header
-# -----------------------
-st.markdown("""
-<div class="header">
-  <h1>👁️ OCULAIRE</h1>
-  <h3>AI-Powered Glaucoma Detection Dashboard — Neon Lab v6</h3>
-</div>
-""", unsafe_allow_html=True)
-st.markdown("---")
-
-# -----------------------
-# Input upload area
+# Main UI layout (uploads)
 # -----------------------
 colA, colB = st.columns(2)
-
 with colA:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.subheader("🩺 RNFLT Map Analysis")
-    if rnflt_input_mode == "NPZ (recommended)":
-        rnflt_file = st.file_uploader("Upload RNFLT file (.npz)", type=["npz"])
-        rnflt_arr = None
-        rnflt_metrics = None
-        if rnflt_file:
-            rnflt_arr, rnflt_metrics = process_npz_file(rnflt_file)
-    else:
-        rnflt_img_file = st.file_uploader("Upload RNFLT image (single grayscale RNFLT)", type=["png","jpg","jpeg"])
-        rnflt_arr = None
-        rnflt_metrics = None
-        rnflt_pil = None
-        if rnflt_img_file:
-            rnflt_arr, rnflt_metrics, rnflt_pil = process_image_rnflt(rnflt_img_file)
-
+    st.subheader("🩺 RNFLT Map Analysis (.npz)")
+    rnflt_file = st.file_uploader("Upload RNFLT file", type=["npz"])
     st.markdown("</div>", unsafe_allow_html=True)
 
 with colB:
@@ -456,177 +453,143 @@ with colB:
 threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
 # -----------------------
-# ANALYSIS pipeline
+# Analysis logic (unchanged)
 # -----------------------
-if rnflt_arr is not None or bscan_file is not None:
+if rnflt_file or bscan_file:
     figs = []
-    severity_overall = 0.0
+    severity_overall = 0
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # RNFLT processing
-    if rnflt_arr is not None:
-        try:
-            metrics = rnflt_metrics
+    # RNFLT Processing
+    if rnflt_file and scaler is not None:
+        rnflt, metrics = process_npz(rnflt_file)
+        if rnflt is not None:
             X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
-            label_r = "Unknown"
-            if scaler is not None and kmeans is not None:
-                Xs = scaler.transform(X)
-                cluster = int(kmeans.predict(Xs)[0])
-                label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
-            else:
-                cluster = "?"
-                label_r = "Unknown (no clustering model)"
-            # compute diff/risk using avg_healthy if available
-            if avg_healthy is not None:
-                healthy = avg_healthy
-                if rnflt_arr.shape != healthy.shape:
-                    healthy = cv2.resize(healthy, (rnflt_arr.shape[1], rnflt_arr.shape[0]))
-                diff = rnflt_arr - healthy
-                risk = np.where(diff < -threshold, diff, np.nan)
-                total = np.isfinite(diff).sum()
-                risky = np.isfinite(risk).sum()
-                sev = (risky / total) * 100 if total else 0.0
-            else:
-                diff = rnflt_arr - np.nanmean(rnflt_arr)
-                risk = np.where(diff < -threshold, diff, np.nan)
-                sev = np.nanpercentile(np.nan_to_num(diff), 75)
-            severity_overall = max(severity_overall, float(sev))
-            # display metrics
+            Xs = scaler.transform(X)
+            cluster = int(kmeans.predict(Xs)[0])
+            label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
+            diff, risk, sev = compute_risk_map(rnflt, avg_healthy, -threshold)
+            severity_overall = max(severity_overall, sev)
             m1, m2, m3, m4 = st.columns([2,2,2,2])
-            m1.markdown(f"<div style='color:var(--muted); font-size:12px;'>Status</div><div style='font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 12px rgba(0,245,255,0.6);'>{'🚨' if 'Glaucoma' in label_r else '✅'} {label_r}</div>", unsafe_allow_html=True)
-            m2.markdown(f"<div style='color:var(--muted); font-size:12px;'>Mean RNFLT</div><div style='font-weight:800; font-size:22px; color:#fff;'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
-            m3.markdown(f"<div style='color:var(--muted); font-size:12px;'>Std Dev</div><div style='font-weight:800; font-size:22px; color:#fff;'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
-            m4.markdown(f"<div style='color:var(--muted); font-size:12px;'>Cluster</div><div style='font-weight:800; font-size:22px; color:#fff;'>{cluster}</div>", unsafe_allow_html=True)
+            m1.markdown(f"<div class='metric-label'>Status</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_r else '✅'} {label_r}</div>", unsafe_allow_html=True)
+            m2.markdown(f"<div class='metric-label'>Mean RNFLT</div><div class='large-metric'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
+            m3.markdown(f"<div class='metric-label'>Std Dev</div><div class='large-metric'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
+            m4.markdown(f"<div class='metric-label'>Cluster</div><div class='large-metric'>{cluster}</div>", unsafe_allow_html=True)
+            st.markdown(render_severity(sev), unsafe_allow_html=True)
 
-            # show RNFLT map image (display bigger)
-            try:
-                # normalize to 0-255 for preview
-                rr = rnflt_arr.copy()
-                rr = (rr - np.nanmin(rr)) / (np.nanmax(rr) - np.nanmin(rr) + 1e-9)
-                rnflt_img_show = Image.fromarray(np.uint8(255 * rr))
-                st.image(rnflt_img_show, caption="RNFLT map (preview)", width=display_width)
-            except Exception:
-                pass
-
-            # show severity
-            st.markdown(render_severity_html(severity_overall), unsafe_allow_html=True)
-
-            # optional plots
-            fig, axes = plt.subplots(1,3,figsize=(18,5), constrained_layout=True)
-            axes[0].imshow(rnflt_arr, cmap='turbo'); axes[0].set_title("Uploaded RNFLT"); axes[0].axis('off')
-            axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30); axes[1].set_title("Difference (vs Healthy)"); axes[1].axis('off')
-            axes[2].imshow(risk, cmap='hot'); axes[2].set_title("Risk Map"); axes[2].axis('off')
-            for ax in axes:
-                ax.set_facecolor('#050612')
+            fig, axes = plt.subplots(1,3,figsize=(18,6),constrained_layout=True)
+            im0=axes[0].imshow(rnflt,cmap='turbo');axes[0].axis('off');axes[0].set_title("Uploaded RNFLT")
+            plt.colorbar(im0,ax=axes[0],shrink=0.85)
+            im1=axes[1].imshow(diff,cmap='bwr',vmin=-30,vmax=30);axes[1].axis('off');axes[1].set_title("Difference (vs Healthy)")
+            plt.colorbar(im1,ax=axes[1],shrink=0.85)
+            im2=axes[2].imshow(risk,cmap='hot');axes[2].axis('off');axes[2].set_title("Risk Map")
+            plt.colorbar(im2,ax=axes[2],shrink=0.85)
             fig.patch.set_facecolor("#050612")
             st.pyplot(fig)
             figs.append(fig)
-        except Exception as e:
-            st.error(f"Error in RNFLT section: {e}")
 
-    # B-scan processing
-    if bscan_file is not None and b_model is not None:
+    # B-Scan Processing
+    if bscan_file and b_model is not None:
+        image_pil = Image.open(bscan_file).convert("L")
+        batch, proc = preprocess_bscan(image_pil)
         try:
-            image_pil = Image.open(bscan_file).convert("L")
-            batch, proc = preprocess_bscan(image_pil, size=(320,320))
-            pred_raw = float(b_model.predict(batch, verbose=0)[0][0])
+            pred_raw = b_model.predict(batch, verbose=0)[0][0]
             label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
             conf = pred_raw*100 if label_b=="Glaucoma-like" else (1-pred_raw)*100
-            severity_overall = max(severity_overall, conf)
+        except Exception:
+            pred_raw = 0.0
+            label_b = "Unknown"
+            conf = 0.0
 
-            st.markdown("<hr>", unsafe_allow_html=True)
-            m1, m2 = st.columns(2)
-            m1.markdown(f"<div style='color:var(--muted); font-size:12px;'>CNN Prediction</div><div style='font-weight:800; font-size:22px; color:#fff;'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
-            m2.markdown(f"<div style='color:var(--muted); font-size:12px;'>Confidence</div><div style='font-weight:800; font-size:22px; color:#fff;'>{conf:.2f}%</div>", unsafe_allow_html=True)
-            st.markdown(render_severity_html(conf), unsafe_allow_html=True)
+        severity_overall = max(severity_overall, conf)
 
-            heat = gradcam(batch, b_model)
-            if heat is not None:
-                hm_small = (cv2.resize(heat, (proc.shape[1], proc.shape[0])) * 255).astype(np.uint8)
-                hm_color = cv2.applyColorMap(hm_small, cv2.COLORMAP_JET)
-                overlay_small = (np.stack([proc]*3, axis=-1) * 255).astype(np.uint8)
-                overlay_small = cv2.addWeighted(overlay_small, 0.6, hm_color, 0.4, 0)
-                orig_w, orig_h = image_pil.size
-                overlay_up = cv2.resize(overlay_small, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
-                overlay_pil = Image.fromarray(overlay_up)
-                st.image([image_pil.resize((display_width, int(display_width * orig_h / orig_w))), overlay_pil.resize((display_width, int(display_width * orig_h / orig_w)))],
-                         caption=["Original B-Scan (preview)", "Grad-CAM Overlay (preview)"], width=display_width)
-            else:
-                st.image(image_pil, caption="Original B-Scan", width=display_width)
-        except Exception as e:
-            st.error(f"B-scan error: {e}")
-    elif bscan_file is not None and b_model is None:
-        st.warning("B-scan model unavailable (bscan_cnn.h5 not found) — uploading still allowed but prediction/grad-cam disabled.")
+        st.markdown("<hr>", unsafe_allow_html=True)
+        m1, m2 = st.columns(2)
+        m1.markdown(f"<div class='metric-label'>CNN Prediction</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
+        m2.markdown(f"<div class='metric-label'>Confidence</div><div class='large-metric'>{conf:.2f}%</div>", unsafe_allow_html=True)
+        st.markdown(render_severity(conf), unsafe_allow_html=True)
 
-    # Combined severity header
+        heat = gradcam(batch, b_model)
+        if heat is not None:
+            heat_r = cv2.resize(heat, (224,224))
+            hm = (heat_r * 255).astype(np.uint8)
+            hm_color = cv2.applyColorMap(hm, cv2.COLORMAP_JET)
+            overlay = (np.stack([proc]*3, axis=-1)*255).astype(np.uint8)
+            overlay = cv2.addWeighted(overlay, 0.6, hm_color, 0.4, 0)
+            st.image([image_pil, overlay], caption=["Original B-Scan", "Grad-CAM Overlay"], use_column_width=True)
+
+    # Combined Severity Summary
     st.markdown("<hr>", unsafe_allow_html=True)
-    st.markdown("<h3 style='text-align:center'>Overall Severity Index</h3>", unsafe_allow_html=True)
-    st.markdown(render_severity_html(severity_overall), unsafe_allow_html=True)
+    st.markdown(f"<h4 style='text-align:center'>Overall Severity Index</h4>", unsafe_allow_html=True)
+    st.markdown(render_severity(severity_overall), unsafe_allow_html=True)
 
-    # Download report buttons
+    # Downloads
     if figs:
         png_bytes = fig_to_png(figs[0])
         pdf_bytes = create_pdf(figs)
-        st.markdown("<div style='text-align:center; margin-top:10px'>", unsafe_allow_html=True)
+        st.markdown("<div class='download-btns'>", unsafe_allow_html=True)
         st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
         st.download_button("📄 Download Full Report (PDF)", data=pdf_bytes, file_name="oculaire_report.pdf", mime="application/pdf")
         st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v6 — For research use only</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
 
 # -----------------------
-# Floating Expander Chat (Streamlit-only)
+# Floating expander (Streamlit-only UI) — behaves like expander but neon
 # -----------------------
 st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
 with st.expander("💬 Ask AI assistant", expanded=False):
-    st.markdown("<div style='font-weight:900; font-size:18px; margin-bottom:6px;'>🤖 OCULAIRE Assistant</div>", unsafe_allow_html=True)
-    st.markdown("<div style='color:var(--muted); margin-bottom:10px;'>Ask about glaucoma, OCT, RNFLT or interpretation of analysis.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:12px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
 
-    # show history
+    # display chat history
     for msg in st.session_state.chat_history:
         if msg["role"] == "user":
             st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
         else:
-            st.markdown(f"<div class='assistant-msg'><strong>OCULAIRE:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
 
-    # input & buttons
-    user_question = st.text_input("Your question:", key="chat_input", placeholder="e.g., What is glaucoma? How does OCT detect it?", label_visibility="collapsed")
+    # input area
+    user_question = st.text_input("Your question:", key="chat_input",
+                                  placeholder="e.g., What is glaucoma? How does OCT detect it?",
+                                  label_visibility="collapsed", help="Type your glaucoma or OCT question here")
+
     col1, col2 = st.columns([4,1])
     with col1:
-        send_btn = st.button("📤 Send")
+        send_btn = st.button("📤 Send", use_container_width=True)
     with col2:
-        clear_btn = st.button("🗑️ Clear chat")
+        clear_btn = st.button("🗑️", use_container_width=True)
 
-    if send_btn:
-        # validate input
-        if not user_question or user_question.strip() == "":
-            st.warning("Please type a question first.")
+    if send_btn and user_question:
+        if not API_KEY:
+            st.error("❌ API key not configured. See sidebar.")
         else:
-            if not API_KEY:
-                st.error("❌ Gemini API key not configured. Add GEMINI_API_KEY to secrets or environment.")
-            else:
-                # Add user message to history, show thinking, then call assistant
-                st.session_state.chat_history.append({"role":"user","content":user_question})
-                # optimistic "thinking" entry
-                st.session_state.chat_history.append({"role":"assistant","content":"⌛ Thinking... contacting Gemini..."})
-                # re-render the page so user sees Thinking (this will re-run this block — but that's OK)
-                # We avoid infinite rerun loop by not calling st.experimental_rerun until after we replace the thinking message
-                # Call assistant synchronously
-                try:
-                    reply = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
-                except Exception as e:
-                    reply = f"❌ Assistant error: {str(e)}"
-                # replace the last assistant placeholder with real reply
-                if st.session_state.chat_history and st.session_state.chat_history[-1]["content"].startswith("⌛"):
-                    st.session_state.chat_history[-1] = {"role":"assistant","content": reply}
-                else:
-                    st.session_state.chat_history.append({"role":"assistant","content": reply})
-                # rerun to update UI (safe)
+            with st.spinner("🔍 Searching for answers..."):
+                # append user query and call assistant
+                st.session_state.chat_history.append({"role": "user", "content": user_question})
+                reply = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
+                st.session_state.chat_history.append({"role": "assistant", "content": reply})
+            # rerun to show updated conversation
+            try:
                 st.experimental_rerun()
+            except Exception:
+                # older/newer streamlit may use st.rerun() — attempt that fallback
+                try:
+                    st.rerun()
+                except Exception:
+                    pass
 
     if clear_btn:
         st.session_state.chat_history = []
-        st.experimental_rerun()
+        try:
+            st.experimental_rerun()
+        except Exception:
+            try:
+                st.rerun()
+            except Exception:
+                pass
 
 st.markdown('</div>', unsafe_allow_html=True)
+
+# End of file
