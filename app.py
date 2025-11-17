@@ -222,7 +222,7 @@ footer { visibility:hidden; }
 # -----------------------
 # Model selectors / name
 # -----------------------
-MODEL_NAME = "models/gemini-1.5-flash"
+MODEL_NAME = "models/gemini-2.5-flash"
 
 # -----------------------
 # Chatbot Function
