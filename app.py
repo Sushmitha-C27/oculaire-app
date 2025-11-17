@@ -233,6 +233,8 @@ def ask_glaucoma_assistant(question, history, api_key):
         return "⚠️ Please configure your Google Gemini API key (see sidebar)."
 
     system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma. 
+
+Your role:
 - Answer ONLY questions related to glaucoma, eye health, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment
 - Provide accurate, evidence-based information about glaucoma
 - Explain medical terminology clearly
@@ -397,69 +399,18 @@ def render_severity(pct):
     </div>
     <script>
       // small delay to ensure layout ready, then set width
-      setTimeout(function(){
+      setTimeout(function(){{
         var el = document.getElementById('sev_inner');
         if (el) el.style.width = '{pct:.1f}%';
-      }, 60);
+      }}, 60);
     </script>
     """
     return html
 
 # -----------------------
-# SIDEBAR: Move inputs & converters ABOVE API status
+# Sidebar (API status + RNFLT/B-scan input mode & converters)
 # -----------------------
 with st.sidebar:
-    st.header("RNFLT & B-Scan Inputs")
-
-    # RNFLT input mode + converter
-    st.subheader("RNFLT input type")
-    rnflt_input_mode = st.radio("", ["NPZ (recommended)", "Image (single RNFLT image)"], index=0)
-    st.markdown("---")
-    st.markdown("**Image → NPZ converter**\nIf you only have RNFLT slice images, upload a sequence (PNG/JPG). I'll pack them into a `volume` and let you download `.npz`.")
-    conv_files = st.file_uploader("Upload RNFLT slice images (ordered)", accept_multiple_files=True, type=["png","jpg","jpeg"], key="rnflt_conv")
-    if conv_files:
-        if st.button("Convert RNFLT slices to .npz and show download", key="conv_rnflt_btn"):
-            try:
-                stacks = []
-                for f in conv_files:
-                    im = Image.open(f).convert("L")
-                    arr = np.array(im).astype(np.float32)
-                    stacks.append(arr)
-                vol = np.stack(stacks, axis=0)
-                buf = io.BytesIO()
-                np.savez_compressed(buf, volume=vol)
-                buf.seek(0)
-                st.success(f"Packed {len(stacks)} slices into volume with shape {vol.shape}")
-                st.download_button("⬇️ Download RNFLT volume (.npz)", data=buf.getvalue(), file_name="rnflt_volume.npz", mime="application/octet-stream")
-            except Exception as e:
-                st.error(f"Conversion error: {e}")
-
-    st.markdown("---")
-    # B-scan input mode + converter
-    st.subheader("B-scan input type")
-    bscan_input_mode = st.radio("", ["Image (recommended)", "NPZ (sequence of B-scan slices)"], index=0, key="bscan_mode")
-    st.markdown("**Image → NPZ converter (B-scan slices)**\nUpload ordered B-scan slice images to pack into a `.npz` volume.")
-    bconv_files = st.file_uploader("Upload B-scan slice images (ordered)", accept_multiple_files=True, type=["png","jpg","jpeg"], key="bscan_conv")
-    if bconv_files:
-        if st.button("Convert B-scan slices to .npz and show download", key="conv_bscan_btn"):
-            try:
-                stacks = []
-                for f in bconv_files:
-                    im = Image.open(f).convert("L")
-                    arr = np.array(im).astype(np.float32)
-                    stacks.append(arr)
-                vol = np.stack(stacks, axis=0)
-                buf = io.BytesIO()
-                np.savez_compressed(buf, volume=vol)
-                buf.seek(0)
-                st.success(f"Packed {len(stacks)} B-scan slices into volume with shape {vol.shape}")
-                st.download_button("⬇️ Download B-scan volume (.npz)", data=buf.getvalue(), file_name="bscan_volume.npz", mime="application/octet-stream")
-            except Exception as e:
-                st.error(f"Conversion error: {e}")
-
-    st.markdown("---")
-    # After all input tools — show API status block next
-    st.markdown("\n---\n")
     st.markdown("<div class='chat-header'>🔑 API Status</div>", unsafe_allow_html=True)
     if API_KEY:
         st.success("✅ Gemini API Key configured")
@@ -467,7 +418,6 @@ with st.sidebar:
     else:
         st.error("❌ No API Key found")
         st.warning("Chatbot will not work without an API key")
-
     st.markdown("---")
     st.markdown("""
     <div style='font-size:12px; color:var(--muted);'>
@@ -484,131 +434,227 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
+    st.markdown("---")
+    st.subheader("RNFLT Input & Tools")
+    rnflt_input_mode = st.radio("RNFLT input type", ["NPZ (recommended)", "Image (single RNFLT image)"])
+    st.markdown("Image → NPZ converter (RNFLT slices)")
+    rnflt_conv_files = st.file_uploader("Upload RNFLT slices (PNG/JPG) for NPZ", accept_multiple_files=True, type=["png","jpg","jpeg"], key="rnflt_conv")
+    if rnflt_conv_files:
+        if st.button("Convert RNFLT images → .npz (download)", key="conv_rnflt"):
+            try:
+                stacks = []
+                for f in rnflt_conv_files:
+                    im = Image.open(f).convert("L")
+                    arr = np.array(im).astype(np.float32)
+                    stacks.append(arr)
+                vol = np.stack(stacks, axis=0)
+                buf = io.BytesIO()
+                np.savez_compressed(buf, volume=vol)
+                buf.seek(0)
+                st.success(f"Packed {len(stacks)} slices into volume {vol.shape}")
+                st.download_button("⬇️ Download RNFLT .npz", data=buf.getvalue(), file_name="rnflt_volume.npz", mime="application/octet-stream")
+            except Exception as e:
+                st.error(f"Conversion error: {e}")
+
+    st.markdown("---")
+    st.subheader("B-Scan Input & Tools")
+    bscan_input_mode = st.radio("B-scan input type", ["Image (recommended)", "NPZ (sequence of B-scan slices)"])
+    st.markdown("Image → NPZ converter (B-scan slices)")
+    bscan_conv_files = st.file_uploader("Upload B-scan slices (PNG/JPG) for NPZ", accept_multiple_files=True, type=["png","jpg","jpeg"], key="bscan_conv")
+    if bscan_conv_files:
+        if st.button("Convert B-scan images → .npz (download)", key="conv_bscan"):
+            try:
+                stacks = []
+                for f in bscan_conv_files:
+                    im = Image.open(f).convert("L")
+                    arr = np.array(im).astype(np.float32)
+                    stacks.append(arr)
+                vol = np.stack(stacks, axis=0)
+                buf = io.BytesIO()
+                np.savez_compressed(buf, volume=vol)
+                buf.seek(0)
+                st.success(f"Packed {len(stacks)} slices into volume {vol.shape}")
+                st.download_button("⬇️ Download B-scan .npz", data=buf.getvalue(), file_name="bscan_volume.npz", mime="application/octet-stream")
+            except Exception as e:
+                st.error(f"Conversion error: {e}")
+
+    st.markdown("---")
+    st.markdown("⚠️ Recommended: RNFLT as NPZ for full maps. B-scan works as an image or a sequence.")
+# end sidebar
+
 # -----------------------
-# Main UI layout (uploads)
+# Main UI layout (uploads) — follow chosen input modes
 # -----------------------
 colA, colB = st.columns(2)
 with colA:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("🩺 RNFLT Map Analysis")
     if rnflt_input_mode == "NPZ (recommended)":
-        rnflt_file = st.file_uploader("Upload RNFLT file (.npz)", type=["npz"], key="rnflt_npz_main")
+        rnflt_file = st.file_uploader("Upload RNFLT file (.npz)", type=["npz"], key="rnflt_npz")
         rnflt_arr = None
         rnflt_metrics = None
         if rnflt_file:
             rnflt_arr, rnflt_metrics = process_npz(rnflt_file)
     else:
-        rnflt_img_file = st.file_uploader("Upload RNFLT image (single grayscale RNFLT)", type=["png","jpg","jpeg"], key="rnflt_img_main")
+        rnflt_img = st.file_uploader("Upload RNFLT image (single) (png/jpg)", type=["png","jpg","jpeg"], key="rnflt_img")
         rnflt_arr = None
         rnflt_metrics = None
         rnflt_pil = None
-        if rnflt_img_file:
+        if rnflt_img:
             try:
-                image = Image.open(rnflt_img_file).convert("L")
-                rnflt_arr = np.array(image).astype(float)
-                vals = rnflt_arr.flatten()
+                pil = Image.open(rnflt_img).convert("L")
+                rr = np.array(pil).astype(float)
+                vals = rr.flatten()
                 rnflt_metrics = {"mean": float(np.nanmean(vals)), "std": float(np.nanstd(vals)), "min": float(np.nanmin(vals)), "max": float(np.nanmax(vals))}
-                rnflt_pil = image
+                rnflt_arr = rr
+                rnflt_pil = pil
             except Exception as e:
                 st.error(f"RNFLT image read error: {e}")
-
     st.markdown("</div>", unsafe_allow_html=True)
 
 with colB:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.subheader("👁️ B-Scan Slice Analysis (Image)")
-    # Use the bscan_input_mode from sidebar to decide expected upload
-    if 'bscan_mode' in st.session_state and st.session_state['bscan_mode'] == "NPZ (sequence of B-scan slices)":
-        bscan_file = st.file_uploader("Upload B-scan volume (.npz)", type=["npz"], key="bscan_npz_main")
+    st.subheader("👁️ B-Scan Slice Analysis")
+    if bscan_input_mode == "Image (recommended)":
+        bscan_file = st.file_uploader("Upload B-Scan Image (jpg/png)", type=["jpg","png","jpeg"], key="bscan_img")
+        bscan_npz_file = None
     else:
-        bscan_file = st.file_uploader("Upload B-Scan Image", type=["jpg","png","jpeg"], key="bscan_img_main")
+        # NPZ mode for B-scan (sequence/volume)
+        bscan_npz_file = st.file_uploader("Upload B-scan volume (.npz)", type=["npz"], key="bscan_npz")
+        bscan_file = None
     st.markdown("</div>", unsafe_allow_html=True)
 
 threshold = st.slider("Thin-zone threshold (µm)", 5, 50, 10)
 
 # -----------------------
-# Analysis logic (unchanged)
+# Analysis logic (unchanged except it uses rnflt_arr / bscan_file or bscan_npz_file)
 # -----------------------
-if ( 'rnflt_arr' in locals() and rnflt_arr is not None ) or bscan_file:
+if (('rnflt_arr' in locals() and rnflt_arr is not None) or rnflt_file or (bscan_file is not None) or (bscan_npz_file is not None)):
     figs = []
     severity_overall = 0
     st.markdown("<hr>", unsafe_allow_html=True)
 
     # RNFLT Processing
     if 'rnflt_arr' in locals() and rnflt_arr is not None:
+        # if we have metrics from earlier
         try:
             metrics = rnflt_metrics
             X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
-            label_r = "Unknown"
             if scaler is not None and kmeans is not None:
                 Xs = scaler.transform(X)
                 cluster = int(kmeans.predict(Xs)[0])
                 label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
             else:
                 cluster = "?"
-                label_r = "Unknown (no clustering model)"
-            # compute diff/risk using avg_healthy if available
+                label_r = "Unknown (no model)"
             if avg_healthy is not None:
-                healthy = avg_healthy
-                if rnflt_arr.shape != healthy.shape:
-                    healthy = cv2.resize(healthy, (rnflt_arr.shape[1], rnflt_arr.shape[0]))
-                diff = rnflt_arr - healthy
-                risk = np.where(diff < -threshold, diff, np.nan)
-                total = np.isfinite(diff).sum()
-                risky = np.isfinite(risk).sum()
-                sev = (risky / total) * 100 if total else 0.0
+                diff, risk, sev = compute_risk_map(rnflt_arr, avg_healthy, -threshold)
             else:
                 diff = rnflt_arr - np.nanmean(rnflt_arr)
                 risk = np.where(diff < -threshold, diff, np.nan)
                 sev = np.nanpercentile(np.nan_to_num(diff), 75)
-            severity_overall = max(severity_overall, float(sev))
-            # display metrics
+            severity_overall = max(severity_overall, sev)
             m1, m2, m3, m4 = st.columns([2,2,2,2])
-            m1.markdown(f"<div style='color:var(--muted); font-size:12px;'>Status</div><div style='font-weight:800; font-size:22px; color:#fff; text-shadow:0 0 12px rgba(0,245,255,0.6);'>{'🚨' if 'Glaucoma' in label_r else '✅'} {label_r}</div>", unsafe_allow_html=True)
-            m2.markdown(f"<div style='color:var(--muted); font-size:12px;'>Mean RNFLT</div><div style='font-weight:800; font-size:22px; color:#fff;'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
-            m3.markdown(f"<div style='color:var(--muted); font-size:12px;'>Std Dev</div><div style='font-weight:800; font-size:22px; color:#fff;'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
-            m4.markdown(f"<div style='color:var(--muted); font-size:12px;'>Cluster</div><div style='font-weight:800; font-size:22px; color:#fff;'>{cluster}</div>", unsafe_allow_html=True)
+            m1.markdown(f"<div class='metric-label'>Status</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_r else '✅'} {label_r}</div>", unsafe_allow_html=True)
+            m2.markdown(f"<div class='metric-label'>Mean RNFLT</div><div class='large-metric'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
+            m3.markdown(f"<div class='metric-label'>Std Dev</div><div class='large-metric'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
+            m4.markdown(f"<div class='metric-label'>Cluster</div><div class='large-metric'>{cluster}</div>", unsafe_allow_html=True)
+            st.markdown(render_severity(sev), unsafe_allow_html=True)
 
-            # show RNFLT map image (display bigger)
-            try:
-                rnflt_img_show = Image.fromarray(np.uint8(255 * (rnflt_arr - np.nanmin(rnflt_arr)) / (np.nanmax(rnflt_arr) - np.nanmin(rnflt_arr) + 1e-9)))
-                st.image(rnflt_img_show, caption="RNFLT map (preview)", width=640)
-            except Exception:
-                pass
-
-            # show severity
-            st.markdown(render_severity(severity_overall), unsafe_allow_html=True)
-
-            # optional plots
-            fig, axes = plt.subplots(1,3,figsize=(18,5), constrained_layout=True)
-            axes[0].imshow(rnflt_arr, cmap='turbo'); axes[0].set_title("Uploaded RNFLT"); axes[0].axis('off')
-            axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30); axes[1].set_title("Difference (vs Healthy)"); axes[1].axis('off')
-            axes[2].imshow(risk, cmap='hot'); axes[2].set_title("Risk Map"); axes[2].axis('off')
-            for ax in axes:
-                ax.set_facecolor('#050612')
+            fig, axes = plt.subplots(1,3,figsize=(18,6),constrained_layout=True)
+            im0=axes[0].imshow(rnflt_arr,cmap='turbo');axes[0].axis('off');axes[0].set_title("Uploaded RNFLT")
+            plt.colorbar(im0,ax=axes[0],shrink=0.85)
+            im1=axes[1].imshow(diff,cmap='bwr',vmin=-30,vmax=30);axes[1].axis('off');axes[1].set_title("Difference (vs Healthy)")
+            plt.colorbar(im1,ax=axes[1],shrink=0.85)
+            im2=axes[2].imshow(risk,cmap='hot');axes[2].axis('off');axes[2].set_title("Risk Map")
+            plt.colorbar(im2,ax=axes[2],shrink=0.85)
             fig.patch.set_facecolor("#050612")
             st.pyplot(fig)
             figs.append(fig)
         except Exception as e:
             st.error(f"Error in RNFLT section: {e}")
 
-    # B-scan processing
-    if bscan_file is not None and b_model is not None:
+    # RNFLT NPZ uploader fallback (older code path)
+    if rnflt_file and ('rnflt_arr' not in locals() or rnflt_arr is None):
+        if scaler is not None:
+            rnflt, metrics = process_npz(rnflt_file)
+            if rnflt is not None:
+                try:
+                    X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
+                    Xs = scaler.transform(X)
+                    cluster = int(kmeans.predict(Xs)[0])
+                    label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
+                except Exception:
+                    cluster = "?"
+                    label_r = "Unknown"
+                diff, risk, sev = compute_risk_map(rnflt, avg_healthy, -threshold)
+                severity_overall = max(severity_overall, sev)
+                m1, m2, m3, m4 = st.columns([2,2,2,2])
+                m1.markdown(f"<div class='metric-label'>Status</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_r else '✅'} {label_r}</div>", unsafe_allow_html=True)
+                m2.markdown(f"<div class='metric-label'>Mean RNFLT</div><div class='large-metric'>{metrics['mean']:.2f}</div>", unsafe_allow_html=True)
+                m3.markdown(f"<div class='metric-label'>Std Dev</div><div class='large-metric'>{metrics['std']:.2f}</div>", unsafe_allow_html=True)
+                m4.markdown(f"<div class='metric-label'>Cluster</div><div class='large-metric'>{cluster}</div>", unsafe_allow_html=True)
+                st.markdown(render_severity(sev), unsafe_allow_html=True)
+                fig, axes = plt.subplots(1,3,figsize=(18,6),constrained_layout=True)
+                im0=axes[0].imshow(rnflt,cmap='turbo');axes[0].axis('off');axes[0].set_title("Uploaded RNFLT")
+                plt.colorbar(im0,ax=axes[0],shrink=0.85)
+                im1=axes[1].imshow(diff,cmap='bwr',vmin=-30,vmax=30);axes[1].axis('off');axes[1].set_title("Difference (vs Healthy)")
+                plt.colorbar(im1,ax=axes[1],shrink=0.85)
+                im2=axes[2].imshow(risk,cmap='hot');axes[2].axis('off');axes[2].set_title("Risk Map")
+                plt.colorbar(im2,ax=axes[2],shrink=0.85)
+                fig.patch.set_facecolor("#050612")
+                st.pyplot(fig)
+                figs.append(fig)
+
+    # B-Scan Processing
+    # If user uploaded an NPZ for B-scan (sequence), take first slice as representative
+    if 'bscan_npz_file' in locals() and bscan_npz_file is not None:
+        try:
+            bscan_vol, _ = process_npz(bscan_npz_file)
+            if bscan_vol is not None:
+                # bscan_vol already flattened to 2D by process_npz if 3D
+                image_pil = Image.fromarray(np.uint8(255 * (bscan_vol - np.nanmin(bscan_vol)) / (np.nanmax(bscan_vol) - np.nanmin(bscan_vol) + 1e-9)))
+                batch, proc = preprocess_bscan(image_pil)
+                if b_model is not None:
+                    pred_raw = b_model.predict(batch, verbose=0)[0][0]
+                    label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
+                    conf = pred_raw*100 if label_b=="Glaucoma-like" else (1-pred_raw)*100
+                else:
+                    label_b = "Unknown"
+                    conf = 0.0
+                severity_overall = max(severity_overall, conf)
+                st.markdown("<hr>", unsafe_allow_html=True)
+                m1, m2 = st.columns(2)
+                m1.markdown(f"<div class='metric-label'>CNN Prediction</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
+                m2.markdown(f"<div class='metric-label'>Confidence</div><div class='large-metric'>{conf:.2f}%</div>", unsafe_allow_html=True)
+                st.markdown(render_severity(conf), unsafe_allow_html=True)
+                st.image([image_pil,], caption=["B-scan slice (from volume)"], use_column_width=True)
+        except Exception as e:
+            st.error(f"B-scan NPZ read error: {e}")
+
+    # B-scan as single image (recommended)
+    if bscan_file:
         try:
             image_pil = Image.open(bscan_file).convert("L")
-            batch, proc = preprocess_bscan(image_pil, size=(320,320))
-            pred_raw = float(b_model.predict(batch, verbose=0)[0][0])
-            label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
-            conf = pred_raw*100 if label_b=="Glaucoma-like" else (1-pred_raw)*100
+            batch, proc = preprocess_bscan(image_pil)
+            try:
+                pred_raw = b_model.predict(batch, verbose=0)[0][0] if b_model is not None else 0.0
+                label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
+                conf = pred_raw*100 if label_b=="Glaucoma-like" else (1-pred_raw)*100
+            except Exception:
+                pred_raw = 0.0
+                label_b = "Unknown"
+                conf = 0.0
+
             severity_overall = max(severity_overall, conf)
 
             st.markdown("<hr>", unsafe_allow_html=True)
             m1, m2 = st.columns(2)
-            m1.markdown(f"<div style='color:var(--muted); font-size:12px;'>CNN Prediction</div><div style='font-weight:800; font-size:22px; color:#fff;'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
-            m2.markdown(f"<div style='color:var(--muted); font-size:12px;'>Confidence</div><div style='font-weight:800; font-size:22px; color:#fff;'>{conf:.2f}%</div>", unsafe_allow_html=True)
+            m1.markdown(f"<div class='metric-label'>CNN Prediction</div><div class='large-metric'>{'🚨' if 'Glaucoma' in label_b else '✅'} {label_b}</div>", unsafe_allow_html=True)
+            m2.markdown(f"<div class='metric-label'>Confidence</div><div class='large-metric'>{conf:.2f}%</div>", unsafe_allow_html=True)
             st.markdown(render_severity(conf), unsafe_allow_html=True)
 
-            heat = gradcam(batch, b_model)
+            heat = gradcam(batch, b_model) if b_model is not None else None
             if heat is not None:
                 heat_r = cv2.resize(heat, (224,224))
                 hm = (heat_r * 255).astype(np.uint8)
@@ -616,10 +662,10 @@ if ( 'rnflt_arr' in locals() and rnflt_arr is not None ) or bscan_file:
                 overlay = (np.stack([proc]*3, axis=-1)*255).astype(np.uint8)
                 overlay = cv2.addWeighted(overlay, 0.6, hm_color, 0.4, 0)
                 st.image([image_pil, overlay], caption=["Original B-Scan", "Grad-CAM Overlay"], use_column_width=True)
+            else:
+                st.image(image_pil, caption="Original B-Scan", use_column_width=True)
         except Exception as e:
             st.error(f"B-scan error: {e}")
-    elif bscan_file is not None and b_model is None:
-        st.warning("B-scan model unavailable (bscan_cnn.h5 not found) — uploading still allowed but prediction/grad-cam disabled.")
 
     # Combined Severity Summary
     st.markdown("<hr>", unsafe_allow_html=True)
@@ -644,7 +690,7 @@ st.markdown("<div style='text-align:center;color:var(--muted);padding:6px;'>OCUL
 st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
 with st.expander("💬 Ask AI assistant", expanded=False):
     st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:12px;'>Ask me anything about glaucoma, OCT, RNFLT, or eye health!</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:var(--muted); font-size:13px; margin-bottom:12px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or eye health!</p>", unsafe_allow_html=True)
 
     # display chat history
     for msg in st.session_state.chat_history:
@@ -677,6 +723,7 @@ with st.expander("💬 Ask AI assistant", expanded=False):
             try:
                 st.experimental_rerun()
             except Exception:
+                # older/newer streamlit may use st.rerun() — attempt that fallback
                 try:
                     st.rerun()
                 except Exception:
@@ -693,5 +740,3 @@ with st.expander("💬 Ask AI assistant", expanded=False):
                 pass
 
 st.markdown('</div>', unsafe_allow_html=True)
-
-# End of file
