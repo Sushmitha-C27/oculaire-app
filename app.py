@@ -1,6 +1,7 @@
 # ============================================================
 #  OCULAIRE — Neon Green UI + Fast Glow Header + Chatbot
 #  Extended: Scan Quality Score + Improved Chatbot (explain scan) + QR code in PDF
+#  + Input Validity Metrics for RNFLT & B-Scan
 # ============================================================
 
 import streamlit as st
@@ -478,6 +479,8 @@ if analysis_trigger:
     if rnflt_arr is not None:
         try:
             metrics = rnflt_metrics or {}
+            validity_label_r = "Unknown"
+
             if scaler is not None and kmeans is not None and metrics:
                 X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
                 Xs = scaler.transform(X)
@@ -499,8 +502,40 @@ if analysis_trigger:
             # Quality for RNFLT map
             q_rnflt, qmeta_rnflt = compute_quality_from_array(rnflt_arr)
 
+            # ---------------- RNFLT VALIDITY HEURISTIC ----------------
+            is_invalid_rnflt = False
+            if metrics:
+                m_mean = metrics.get("mean", 0)
+                m_std  = metrics.get("std", 0)
+
+                # RNFLT typically ~40–120 µm
+                if m_mean < 20 or m_mean > 200:
+                    is_invalid_rnflt = True
+
+                # Too flat or too noisy
+                if m_std < 5 or m_std > 80:
+                    is_invalid_rnflt = True
+
+                # Very low quality or extreme edges
+                if q_rnflt < 40:
+                    is_invalid_rnflt = True
+                if qmeta_rnflt.get("var_lap", 0) > 5000:
+                    is_invalid_rnflt = True
+
+            if is_invalid_rnflt:
+                run_label_r = "Invalid / Non-RNFLT Input"
+                cluster = "N/A"
+                validity_label_r = "Possibly Invalid"
+                st.error(
+                    "⚠️ This does **not** appear to be a typical RNFLT thickness map. "
+                    "It may be a screenshot, non-OCT image, or very noisy scan. "
+                    "RNFLT cluster label may be unreliable."
+                )
+            else:
+                validity_label_r = "Likely Valid RNFLT"
+
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Status", run_label_r)
+            c1.metric("RNFLT Status", run_label_r)
             if metrics:
                 c2.metric("Mean RNFLT", f"{metrics['mean']:.2f}")
                 c3.metric("Std Dev", f"{metrics['std']:.2f}")
@@ -509,7 +544,11 @@ if analysis_trigger:
                 c3.metric("Std Dev", "-")
             c4.metric("Cluster", str(cluster))
 
-            st.markdown(f"**RNFLT Scan Quality:** {q_rnflt:.1f}% — (sharp:{qmeta_rnflt['sharp_score']:.1f}, snr:{qmeta_rnflt['snr_score']:.1f})")
+            st.metric("RNFLT Input Validity", validity_label_r)
+            st.markdown(
+                f"**RNFLT Scan Quality:** {q_rnflt:.1f}% — "
+                f"(sharp:{qmeta_rnflt['sharp_score']:.1f}, snr:{qmeta_rnflt['snr_score']:.1f})"
+            )
 
             fig, axes = plt.subplots(1, 3, figsize=(18,6))
             im0 = axes[0].imshow(rnflt_arr, cmap='turbo'); axes[0].axis('off'); axes[0].set_title("RNFLT Map")
@@ -534,52 +573,85 @@ if analysis_trigger:
             # compute quality
             q_bscan, qmeta_bscan = compute_quality_from_image_pil(pil)
 
+            # ---------------- B-SCAN VALIDITY HEURISTIC ----------------
+            w, h = pil.size
+            is_invalid_bscan = False
+            validity_label_b = "Unknown"
+
+            # Very small or tiny images are unlikely to be OCT B-scans
+            if w < 128 or h < 128:
+                is_invalid_bscan = True
+
+            # Low quality or too sharp (screenshots / text)
+            if q_bscan < 40:
+                is_invalid_bscan = True
+            if qmeta_bscan.get("var_lap", 0) > 6000:
+                is_invalid_bscan = True
+
             conf_text = ""
-            if b_model is not None:
-                pred_raw = float(b_model.predict(batch, verbose=0)[0][0])
-                prob_glaucoma = pred_raw
-                prob_healthy = 1.0 - prob_glaucoma
 
-                HIGH_THR = 0.6
-                LOW_THR = 0.4
-
-                if prob_glaucoma >= HIGH_THR:
-                    run_label_b = "Glaucoma-like"
-                    run_conf = prob_glaucoma * 100
-                    conf_text = "High confidence prediction for glaucoma-like pattern."
-                elif prob_glaucoma <= LOW_THR:
-                    run_label_b = "Healthy-like"
-                    run_conf = prob_healthy * 100
-                    conf_text = "High confidence prediction for healthy-like pattern."
-                else:
-                    run_label_b = "Uncertain"
-                    run_conf = max(prob_glaucoma, prob_healthy) * 100
-                    conf_text = (
-                        "Borderline / low-confidence prediction. "
-                        "This scan may be noisy, low-quality, or not a typical OCT B-scan. "
-                        "Interpret with caution."
-                    )
-            else:
-                run_label_b = "Unknown"
+            if is_invalid_bscan:
+                run_label_b = "Invalid / Non-OCT Input"
                 run_conf = 0.0
+                validity_label_b = "Possibly Invalid"
+                conf_text = (
+                    "This does not appear to be a typical OCT B-scan (may be a screenshot or non-medical image). "
+                    "Prediction is suppressed; please upload a valid OCT slice."
+                )
+            else:
+                validity_label_b = "Likely Valid B-scan"
+                if b_model is not None:
+                    pred_raw = float(b_model.predict(batch, verbose=0)[0][0])
+                    prob_glaucoma = pred_raw
+                    prob_healthy = 1.0 - prob_glaucoma
+
+                    HIGH_THR = 0.6
+                    LOW_THR = 0.4
+
+                    if prob_glaucoma >= HIGH_THR:
+                        run_label_b = "Glaucoma-like"
+                        run_conf = prob_glaucoma * 100
+                        conf_text = "High confidence prediction for glaucoma-like pattern."
+                    elif prob_glaucoma <= LOW_THR:
+                        run_label_b = "Healthy-like"
+                        run_conf = prob_healthy * 100
+                        conf_text = "High confidence prediction for healthy-like pattern."
+                    else:
+                        run_label_b = "Uncertain"
+                        run_conf = max(prob_glaucoma, prob_healthy) * 100
+                        conf_text = (
+                            "Borderline / low-confidence prediction. "
+                            "This scan may be noisy, low-quality, or atypical. Interpret with caution."
+                        )
+                else:
+                    run_label_b = "Unknown"
+                    run_conf = 0.0
+                    conf_text = "Model not loaded; unable to compute CNN prediction."
 
             run_severity = max(run_severity, run_conf)
 
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             col1.metric("CNN Prediction", run_label_b)
             col2.metric("Confidence", f"{run_conf:.2f}%")
-            st.markdown(f"**B-scan Quality:** {q_bscan:.1f}% — (sharp:{qmeta_bscan['sharp_score']:.1f}, snr:{qmeta_bscan['snr_score']:.1f})")
+            col3.metric("B-scan Validity", validity_label_b)
+
+            st.markdown(
+                f"**B-scan Quality:** {q_bscan:.1f}% — "
+                f"(sharp:{qmeta_bscan['sharp_score']:.1f}, snr:{qmeta_bscan['snr_score']:.1f})"
+            )
 
             if conf_text:
                 st.markdown(f"*{conf_text}*")
 
-            # Extra warning for very low quality scans
-            if q_bscan < 40:
-                st.warning("⚠️ Low-quality or atypical scan detected. Model output may be unreliable or non-OCT.")
+            if is_invalid_bscan:
+                st.warning("⚠️ Low-quality or non-OCT image detected. Model output is not reliable for diagnosis.")
 
             st.markdown(render_severity(run_conf), unsafe_allow_html=True)
 
-            heat = gradcam(batch, b_model) if b_model else None
+            heat = None
+            if (not is_invalid_bscan) and b_model is not None:
+                heat = gradcam(batch, b_model)
+
             if heat is not None:
                 heat_r = cv2.resize(heat, (proc.shape[1], proc.shape[0]))
                 hm = (heat_r * 255).astype(np.uint8)
@@ -604,6 +676,16 @@ if analysis_trigger:
 
     # save run context into session_state for PDF + chatbot
     if run_figs:
+        # average quality if both present
+        qual_vals = []
+        if rnflt_arr is not None:
+            q_rnflt_val, _ = compute_quality_from_array(rnflt_arr)
+            qual_vals.append(q_rnflt_val)
+        if bscan_file is not None:
+            q_bscan_val, _ = compute_quality_from_image_pil(Image.open(bscan_file).convert("L"))
+            qual_vals.append(q_bscan_val)
+        avg_quality = float(np.mean(qual_vals)) if qual_vals else 0.0
+
         st.session_state['pdf_figs'] = run_figs
         st.session_state['pdf_context'] = {
             "rnflt_metrics": run_rnflt_metrics,
@@ -611,9 +693,7 @@ if analysis_trigger:
             "rnflt_severity": run_severity,
             "bscan_label": run_label_b,
             "bscan_conf": run_conf,
-            # quality: average of available
-            "quality": float(np.mean([v for v in [ (compute_quality_from_array(rnflt_arr)[0] if rnflt_arr is not None else None),
-                                                  (compute_quality_from_image_pil(Image.open(bscan_file).convert('L'))[0] if bscan_file else None) ] if v is not None]) if True else 0.0)
+            "quality": avg_quality
         }
         # quick downloads
         png_bytes = fig_to_png(run_figs[0])
@@ -795,12 +875,23 @@ def generate_full_pdf(figs,
         risk_color = colors.HexColor("#ff6b6b")
         risk_text = "⚠️ ABNORMAL PATTERNS DETECTED"
         risk_level = ("HIGH" if (rnflt_severity or 0) >= 60 else "MODERATE" if (rnflt_severity or 0) >= 30 else "LOW-MODERATE")
+    elif (rnflt_cluster == "Invalid / Non-RNFLT Input") or (bscan_label == "Invalid / Non-OCT Input"):
+        risk_color = colors.HexColor("#ffaa00")
+        risk_text = "⚠️ INVALID / LOW-QUALITY INPUT"
+        risk_level = "UNRELIABLE"
     else:
         risk_color = colors.HexColor("#39ff14")
         risk_text = "✅ NORMAL PATTERNS DETECTED"
         risk_level = "LOW"
 
-    exec_para = Paragraph(f"<b>Status:</b> {risk_text}<br/><b>Risk Level:</b> {risk_level}<br/><b>Severity Index:</b> {(rnflt_severity or 0):.1f}%<br/><b>CNN Confidence:</b> {(bscan_conf or 0):.1f}%<br/><b>Scan Quality:</b> {(quality or 0):.1f}%", clinical_blue)
+    exec_para = Paragraph(
+        f"<b>Status:</b> {risk_text}"
+        f"<br/><b>Risk Level:</b> {risk_level}"
+        f"<br/><b>Severity Index:</b> {(rnflt_severity or 0):.1f}%"
+        f"<br/><b>CNN Confidence:</b> {(bscan_conf or 0):.1f}%"
+        f"<br/><b>Overall Scan Quality:</b> {(quality or 0):.1f}%",
+        clinical_blue
+    )
     box_table = Table([[exec_para]], colWidths=[450])
     box_table.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,-1), risk_color),
@@ -823,7 +914,6 @@ def generate_full_pdf(figs,
             qr.save(qr_buf, format="PNG")
             qr_buf.seek(0)
             img = RLImage(qr_buf, width=1.25*inch, height=1.25*inch)
-            # place to the right of metadata (simple append)
             story.append(Spacer(1, 6))
             story.append(img)
             story.append(Spacer(1, 6))
@@ -835,14 +925,37 @@ def generate_full_pdf(figs,
     # PAGE 2: Clinical interpretation and RNFLT stats (blue descriptions)
     story.append(Paragraph("CLINICAL INTERPRETATION", header_green))
     story.append(Spacer(1, 10))
-    if rnflt_cluster == "Glaucoma-like":
-        story.append(Paragraph("The AI analysis has detected <b>patterns consistent with glaucomatous changes</b> in your retinal nerve fiber layer structure. This includes thinning relative to the healthy reference database.", clinical_blue))
+
+    if rnflt_cluster == "Invalid / Non-RNFLT Input" or bscan_label == "Invalid / Non-OCT Input":
+        story.append(Paragraph(
+            "One or more uploaded images were detected as <b>invalid or non-standard ophthalmic inputs</b>. "
+            "The AI system has flagged these scans as low-confidence, and the findings should not be interpreted as a clinical diagnosis. "
+            "Please repeat the scan with proper OCT images for reliable assessment.",
+            clinical_blue
+        ))
+    elif rnflt_cluster == "Glaucoma-like":
+        story.append(Paragraph(
+            "The AI analysis has detected <b>patterns consistent with glaucomatous changes</b> in your retinal nerve fiber layer structure. "
+            "This includes thinning relative to the healthy reference database.",
+            clinical_blue
+        ))
     else:
-        story.append(Paragraph("The retinal nerve fiber layer thickness pattern appears <b>within normal ranges</b>. No significant signs of glaucomatous thinning are identified.", clinical_blue))
+        story.append(Paragraph(
+            "The retinal nerve fiber layer thickness pattern appears <b>within normal ranges</b>. "
+            "No significant signs of glaucomatous thinning are identified.",
+            clinical_blue
+        ))
+
     story.append(Spacer(1, 10))
     story.append(Paragraph("<b>Key Findings</b>", clinical_blue)); story.append(Spacer(1,6))
 
-    if rnflt_cluster == "Glaucoma-like":
+    if rnflt_cluster == "Invalid / Non-RNFLT Input" or bscan_label == "Invalid / Non-OCT Input":
+        findings = [
+            "- One or more scans were flagged as invalid/low-quality by the AI quality checks.",
+            "- RNFLT/B-scan interpretation may not be reliable for this input.",
+            "- A repeat scan with correct OCT imaging is recommended before drawing conclusions."
+        ]
+    elif rnflt_cluster == "Glaucoma-like":
         findings = [
             "- RNFL thinning detected in critical sectors.",
             f"- { (rnflt_severity or 0):.1f }% of retinal area flagged as at-risk.",
@@ -904,9 +1017,23 @@ def generate_full_pdf(figs,
     # PAGE 5: Recommendations & Lifestyle
     story.append(Paragraph("RECOMMENDATIONS & ACTION PLAN", header_green)); story.append(Spacer(1,8))
     if rnflt_cluster == "Glaucoma-like":
-        recs = ["Schedule ophthalmologist visit within 1–2 weeks.", "Request tonometry, visual fields, gonioscopy and dilated optic nerve exam.", "Bring this report to your appointment."]
+        recs = [
+            "Schedule ophthalmologist visit within 1–2 weeks.",
+            "Request tonometry, visual fields, gonioscopy and dilated optic nerve exam.",
+            "Bring this report and prior eye records to your appointment."
+        ]
+    elif rnflt_cluster == "Invalid / Non-RNFLT Input" or bscan_label == "Invalid / Non-OCT Input":
+        recs = [
+            "Repeat OCT imaging with proper fixation and scan alignment.",
+            "Ensure that correct RNFLT/B-scan exports are uploaded (not screenshots or photos).",
+            "Consult an ophthalmologist for formal interpretation of valid OCT scans."
+        ]
     else:
-        recs = ["Continue routine annual eye exams.", "Document this baseline for future comparison.", "Consider earlier follow-up if any symptoms occur."]
+        recs = [
+            "Continue routine annual eye exams.",
+            "Document this baseline for future comparison.",
+            "Consider earlier follow-up if any new visual symptoms occur."
+        ]
     for r in recs: story.append(Paragraph(f"- {r}", clinical_blue))
     story.append(Spacer(1,8))
     story.append(Paragraph("<b>Lifestyle Recommendations</b>", clinical_blue))
@@ -916,7 +1043,11 @@ def generate_full_pdf(figs,
 
     # PAGE 6: Disclaimers & References
     story.append(Paragraph("IMPORTANT MEDICAL DISCLAIMER", header_green)); story.append(Spacer(1,8))
-    story.append(Paragraph("This OCULAIRE report is generated by an AI screening tool for research and educational purposes only. It is not a clinical diagnosis. Always consult an ophthalmologist for medical decisions.", clinical_blue))
+    story.append(Paragraph(
+        "This OCULAIRE report is generated by an AI screening tool for research and educational purposes only. "
+        "It is not a clinical diagnosis. Always consult an ophthalmologist for medical decisions.",
+        clinical_blue
+    ))
     story.append(Spacer(1,8))
     story.append(Paragraph("<b>Methodology & References</b>", header_green))
     refs = ["Weinreb RN et al., JAMA 2014", "Tham YC et al., Ophthalmology 2014", "European Glaucoma Society Guidelines 2021"]
@@ -945,7 +1076,13 @@ if st.session_state.get("trigger_pdf", False):
             )
             st.markdown("<hr>", unsafe_allow_html=True)
             st.subheader("📄 Download Full OCULAIRE Medical Report")
-            st.download_button(label="📄 Download Full PDF Report (6 Pages)", data=final_pdf, file_name="OCULAIRE_Full_Report.pdf", mime="application/pdf", use_container_width=True)
+            st.download_button(
+                label="📄 Download Full PDF Report (6 Pages)",
+                data=final_pdf,
+                file_name="OCULAIRE_Full_Report.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
         except Exception as e:
             st.error(f"PDF generation error: {e}")
     else:
