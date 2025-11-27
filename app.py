@@ -475,65 +475,79 @@ if analysis_trigger:
     run_conf = 0.0
     run_severity = 0.0
 
-    # RNFLT analysis
+    # ============================================================
+    # RNFLT analysis  (with strict validity check)
+    # ============================================================
     if rnflt_arr is not None:
         try:
             metrics = rnflt_metrics or {}
-            validity_label_r = "Unknown"
 
-            if scaler is not None and kmeans is not None and metrics:
-                X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
-                Xs = scaler.transform(X)
-                cluster = int(kmeans.predict(Xs)[0])
-                run_label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
-            else:
-                cluster = "?"
-                run_label_r = "Unknown"
-
-            if avg_healthy is not None:
-                diff, risk, sev = compute_risk_map(rnflt_arr, avg_healthy, -threshold)
-            else:
-                diff = rnflt_arr - np.nanmean(rnflt_arr)
-                risk = np.where(diff < -threshold, diff, np.nan)
-                sev = 0.0
-
-            run_severity = max(run_severity, sev)
-
-            # Quality for RNFLT map
+            # 1) Quality first
             q_rnflt, qmeta_rnflt = compute_quality_from_array(rnflt_arr)
 
-            # ---------------- RNFLT VALIDITY HEURISTIC ----------------
+            # 2) Strong validity heuristic BEFORE clustering
             is_invalid_rnflt = False
-            if metrics:
-                m_mean = metrics.get("mean", 0)
-                m_std  = metrics.get("std", 0)
+            m_mean = metrics.get("mean", 0.0)
+            m_std  = metrics.get("std", 0.0)
+            m_min  = metrics.get("min", 0.0)
+            m_max  = metrics.get("max", 0.0)
 
-                # RNFLT typically ~40–120 µm
-                if m_mean < 20 or m_mean > 200:
-                    is_invalid_rnflt = True
+            # Physiological RNFLT range: roughly 40–120 µm
+            if (m_mean < 40) or (m_mean > 120):
+                is_invalid_rnflt = True
 
-                # Too flat or too noisy
-                if m_std < 5 or m_std > 80:
-                    is_invalid_rnflt = True
+            # Too flat or insanely noisy
+            if (m_std < 5) or (m_std > 60):
+                is_invalid_rnflt = True
 
-                # Very low quality or extreme edges
-                if q_rnflt < 40:
-                    is_invalid_rnflt = True
-                if qmeta_rnflt.get("var_lap", 0) > 5000:
-                    is_invalid_rnflt = True
+            # Values way outside expected µm limits
+            if (m_min < 0) or (m_max > 250):
+                is_invalid_rnflt = True
 
+            # Low-quality or harsh edges → likely screenshot / non-OCT
+            if q_rnflt < 40:
+                is_invalid_rnflt = True
+            if qmeta_rnflt.get("var_lap", 0.0) > 4000:
+                is_invalid_rnflt = True
+
+            # 3) If invalid: override label & skip K-Means
             if is_invalid_rnflt:
                 run_label_r = "Invalid / Non-RNFLT Input"
                 cluster = "N/A"
-                validity_label_r = "Possibly Invalid"
+                validity_label_r = "Invalid / Out-of-distribution"
+
+                diff = rnflt_arr - np.nanmean(rnflt_arr)
+                risk = np.full_like(rnflt_arr, np.nan)
+                sev = 0.0
+
                 st.error(
-                    "⚠️ This does **not** appear to be a typical RNFLT thickness map. "
-                    "It may be a screenshot, non-OCT image, or very noisy scan. "
-                    "RNFLT cluster label may be unreliable."
+                    "⚠️ This does **not** appear to be a valid RNFLT thickness map. "
+                    "It may be a screenshot, non-OCT image, or extremely atypical scan. "
+                    "RNFLT clustering is skipped and this result should not be used for diagnosis."
                 )
             else:
                 validity_label_r = "Likely Valid RNFLT"
 
+                if scaler is not None and kmeans is not None and metrics:
+                    X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
+                    Xs = scaler.transform(X)
+                    cluster = int(kmeans.predict(Xs)[0])
+                    run_label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
+                else:
+                    cluster = "?"
+                    run_label_r = "Unknown"
+
+                if avg_healthy is not None:
+                    diff, risk, sev = compute_risk_map(rnflt_arr, avg_healthy, -threshold)
+                else:
+                    diff = rnflt_arr - np.nanmean(rnflt_arr)
+                    risk = np.where(diff < -threshold, diff, np.nan)
+                    sev = 0.0
+
+            if not is_invalid_rnflt:
+                run_severity = max(run_severity, sev)
+
+            # Metrics display
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("RNFLT Status", run_label_r)
             if metrics:
@@ -550,6 +564,7 @@ if analysis_trigger:
                 f"(sharp:{qmeta_rnflt['sharp_score']:.1f}, snr:{qmeta_rnflt['snr_score']:.1f})"
             )
 
+            # Plots
             fig, axes = plt.subplots(1, 3, figsize=(18,6))
             im0 = axes[0].imshow(rnflt_arr, cmap='turbo'); axes[0].axis('off'); axes[0].set_title("RNFLT Map")
             plt.colorbar(im0, ax=axes[0], shrink=0.85)
@@ -565,24 +580,21 @@ if analysis_trigger:
         except Exception as e:
             st.error(f"RNFLT Error: {e}")
 
-    # B-scan analysis
+    # ============================================================
+    # B-scan analysis (with validity + confidence threshold)
+    # ============================================================
     if bscan_file:
         try:
             pil = Image.open(bscan_file).convert("L")
             batch, proc = preprocess_bscan(pil)
-            # compute quality
             q_bscan, qmeta_bscan = compute_quality_from_image_pil(pil)
 
-            # ---------------- B-SCAN VALIDITY HEURISTIC ----------------
             w, h = pil.size
             is_invalid_bscan = False
             validity_label_b = "Unknown"
 
-            # Very small or tiny images are unlikely to be OCT B-scans
             if w < 128 or h < 128:
                 is_invalid_bscan = True
-
-            # Low quality or too sharp (screenshots / text)
             if q_bscan < 40:
                 is_invalid_bscan = True
             if qmeta_bscan.get("var_lap", 0) > 6000:
@@ -593,7 +605,7 @@ if analysis_trigger:
             if is_invalid_bscan:
                 run_label_b = "Invalid / Non-OCT Input"
                 run_conf = 0.0
-                validity_label_b = "Possibly Invalid"
+                validity_label_b = "Invalid / Out-of-distribution"
                 conf_text = (
                     "This does not appear to be a typical OCT B-scan (may be a screenshot or non-medical image). "
                     "Prediction is suppressed; please upload a valid OCT slice."
@@ -676,7 +688,6 @@ if analysis_trigger:
 
     # save run context into session_state for PDF + chatbot
     if run_figs:
-        # average quality if both present
         qual_vals = []
         if rnflt_arr is not None:
             q_rnflt_val, _ = compute_quality_from_array(rnflt_arr)
@@ -695,7 +706,6 @@ if analysis_trigger:
             "bscan_conf": run_conf,
             "quality": avg_quality
         }
-        # quick downloads
         png_bytes = fig_to_png(run_figs[0])
         st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png")
         if st.button("📄 Generate Full Medical Report (PDF)"):
@@ -729,7 +739,6 @@ def build_scan_summary_for_prompt():
     return " ".join(parts)
 
 def ask_glaucoma_assistant(question, history, api_key):
-    """Call Google Gemini API with glaucoma-specific context. If question asks to 'explain' include scan summary."""
     if not api_key or not api_key.strip():
         return "⚠️ Please configure your Google Gemini API key (see sidebar)."
 
@@ -737,7 +746,6 @@ def ask_glaucoma_assistant(question, history, api_key):
 Answer concisely (<= 200 words) and include a brief disclaimer that this is educational information not medical advice.
 If user asks to 'explain my scan' or similar, use the provided scan summary context to explain results and provide practical next steps (tests to request, urgency)."""
 
-    # detect explain intent
     q_lower = question.lower()
     include_scan = any(kw in q_lower for kw in ["explain my scan", "explain my result", "explain the scan", "explain my rnflt", "explain my b-scan", "explain this scan"])
     scan_summary = build_scan_summary_for_prompt() if include_scan else ""
@@ -789,7 +797,6 @@ with st.expander("💬 Ask AI assistant", expanded=False):
     st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
     st.markdown("<p style='text-align:center; color:#b8ffb8; font-size:13px; margin-bottom:12px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or request 'explain my scan'</p>", unsafe_allow_html=True)
 
-    # show history
     for msg in st.session_state.chat_history:
         if msg["role"] == "user":
             st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
@@ -870,7 +877,6 @@ def generate_full_pdf(figs,
     story.append(meta_table)
     story.append(Spacer(1, 12))
 
-    # Executive summary box
     if (rnflt_cluster == "Glaucoma-like") or (bscan_label == "Glaucoma-like"):
         risk_color = colors.HexColor("#ff6b6b")
         risk_text = "⚠️ ABNORMAL PATTERNS DETECTED"
@@ -905,7 +911,6 @@ def generate_full_pdf(figs,
     story.append(box_table)
     story.append(Spacer(1, 12))
 
-    # QR code (if available) — link points to a placeholder URL containing report_id
     if QR_AVAILABLE:
         try:
             qr_url = f"https://example.com/oculaire/report/{report_id}"
@@ -922,7 +927,6 @@ def generate_full_pdf(figs,
 
     story.append(PageBreak())
 
-    # PAGE 2: Clinical interpretation and RNFLT stats (blue descriptions)
     story.append(Paragraph("CLINICAL INTERPRETATION", header_green))
     story.append(Spacer(1, 10))
 
@@ -990,7 +994,6 @@ def generate_full_pdf(figs,
         story.append(rnflt_table)
     story.append(PageBreak())
 
-    # PAGE 3: Figures
     story.append(Paragraph("DETAILED VISUAL ANALYSIS", header_green))
     story.append(Spacer(1,8))
     for fig in figs or []:
@@ -1003,7 +1006,6 @@ def generate_full_pdf(figs,
             pass
     story.append(PageBreak())
 
-    # PAGE 4: Symptoms & Risk Factors
     story.append(Paragraph("SYMPTOMS & RISK FACTORS", header_green)); story.append(Spacer(1,8))
     story.append(Paragraph("<b>Symptoms to Monitor</b>", clinical_blue))
     symptoms = ["Gradual peripheral vision loss", "Blurred vision or halos", "Difficulty adjusting to darkness", "Eye discomfort or headaches"]
@@ -1014,7 +1016,6 @@ def generate_full_pdf(figs,
     for r in risks: story.append(Paragraph(f"- {r}", clinical_blue))
     story.append(PageBreak())
 
-    # PAGE 5: Recommendations & Lifestyle
     story.append(Paragraph("RECOMMENDATIONS & ACTION PLAN", header_green)); story.append(Spacer(1,8))
     if rnflt_cluster == "Glaucoma-like":
         recs = [
@@ -1041,7 +1042,6 @@ def generate_full_pdf(figs,
     for l in lifestyle: story.append(Paragraph(f"- {l}", clinical_blue))
     story.append(PageBreak())
 
-    # PAGE 6: Disclaimers & References
     story.append(Paragraph("IMPORTANT MEDICAL DISCLAIMER", header_green)); story.append(Spacer(1,8))
     story.append(Paragraph(
         "This OCULAIRE report is generated by an AI screening tool for research and educational purposes only. "
