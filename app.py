@@ -308,7 +308,6 @@ def estimate_snr(img_gray):
     if std_noise < 1e-6:
         return 100.0
     snr = mean_signal / std_noise
-    # map SNR to 0..100
     snr_score = 100 * (np.tanh((snr - 1.0) / 1.5) * 0.5 + 0.5)
     return float(np.clip(snr_score, 0, 100))
 
@@ -325,7 +324,11 @@ def compute_quality_from_image_pil(pil_img):
         snr_s = estimate_snr(np.array(gray))
         sharp_s, var_lap = estimate_sharpness(gray)
         combined = 0.6 * sharp_s + 0.4 * snr_s
-        return float(np.clip(combined, 0, 100)), {"snr_score": snr_s, "sharp_score": sharp_s, "var_lap": var_lap}
+        return float(np.clip(combined, 0, 100)), {
+            "snr_score": snr_s,
+            "sharp_score": sharp_s,
+            "var_lap": var_lap
+        }
     except Exception:
         return 0.0, {"snr_score": 0.0, "sharp_score": 0.0, "var_lap": 0.0}
 
@@ -391,25 +394,41 @@ with st.sidebar:
     st.markdown("## 🩺 RNFLT Input & Tools")
     rnflt_input_mode = st.radio("RNFLT input type", ["NPZ (recommended)", "Single Image"]) 
 
-    rnflt_conv = st.file_uploader("Upload RNFLT slices → convert to .npz", accept_multiple_files=True, type=["png","jpg","jpeg"]) 
+    rnflt_conv = st.file_uploader(
+        "Upload RNFLT slices → convert to .npz",
+        accept_multiple_files=True,
+        type=["png","jpg","jpeg"]
+    )
     if rnflt_conv:
         if st.button("Convert RNFLT slices to NPZ"):
             data, shape = convert_images_to_npz(rnflt_conv)
             if data:
                 st.success(f"Packed slices into volume shape {shape}")
-                st.download_button("⬇️ Download RNFLT volume", data=data, file_name="rnflt_volume.npz")
+                st.download_button(
+                    "⬇️ Download RNFLT volume",
+                    data=data,
+                    file_name="rnflt_volume.npz"
+                )
 
     st.markdown("---")
     st.markdown("## 👁️ B-Scan Input & Tools")
     bscan_input_mode = st.radio("B-scan input type", ["Image (recommended)", "NPZ (multi-slice)"])
 
-    bscan_conv = st.file_uploader("Upload B-scan slices → convert to .npz", accept_multiple_files=True, type=["png","jpg","jpeg"]) 
+    bscan_conv = st.file_uploader(
+        "Upload B-scan slices → convert to .npz",
+        accept_multiple_files=True,
+        type=["png","jpg","jpeg"]
+    )
     if bscan_conv:
         if st.button("Convert B-scan slices to NPZ"):
             data, shape = convert_images_to_npz(bscan_conv)
             if data:
                 st.success(f"Packed B-scan slices into {shape}")
-                st.download_button("⬇️ Download B-scan volume", data=data, file_name="bscan_volume.npz")
+                st.download_button(
+                    "⬇️ Download B-scan volume",
+                    data=data,
+                    file_name="bscan_volume.npz"
+                )
 
     st.markdown("---")
     threshold = st.slider("Thin-zone threshold (µm)", min_value=5, max_value=50, value=10)
@@ -482,35 +501,25 @@ if analysis_trigger:
         try:
             metrics = rnflt_metrics or {}
 
-            # 1) Quality first
             q_rnflt, qmeta_rnflt = compute_quality_from_array(rnflt_arr)
 
-            # 2) Strong validity heuristic BEFORE clustering
             is_invalid_rnflt = False
             m_mean = metrics.get("mean", 0.0)
             m_std  = metrics.get("std", 0.0)
             m_min  = metrics.get("min", 0.0)
             m_max  = metrics.get("max", 0.0)
 
-            # Physiological RNFLT range: roughly 40–120 µm
             if (m_mean < 40) or (m_mean > 120):
                 is_invalid_rnflt = True
-
-            # Too flat or insanely noisy
             if (m_std < 5) or (m_std > 60):
                 is_invalid_rnflt = True
-
-            # Values way outside expected µm limits
             if (m_min < 0) or (m_max > 250):
                 is_invalid_rnflt = True
-
-            # Low-quality or harsh edges → likely screenshot / non-OCT
             if q_rnflt < 40:
                 is_invalid_rnflt = True
             if qmeta_rnflt.get("var_lap", 0.0) > 4000:
                 is_invalid_rnflt = True
 
-            # 3) If invalid: override label & skip K-Means
             if is_invalid_rnflt:
                 run_label_r = "Invalid / Non-RNFLT Input"
                 cluster = "N/A"
@@ -547,7 +556,6 @@ if analysis_trigger:
             if not is_invalid_rnflt:
                 run_severity = max(run_severity, sev)
 
-            # Metrics display
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("RNFLT Status", run_label_r)
             if metrics:
@@ -564,7 +572,6 @@ if analysis_trigger:
                 f"(sharp:{qmeta_rnflt['sharp_score']:.1f}, snr:{qmeta_rnflt['snr_score']:.1f})"
             )
 
-            # Plots
             fig, axes = plt.subplots(1, 3, figsize=(18,6))
             im0 = axes[0].imshow(rnflt_arr, cmap='turbo'); axes[0].axis('off'); axes[0].set_title("RNFLT Map")
             plt.colorbar(im0, ax=axes[0], shrink=0.85)
@@ -581,7 +588,7 @@ if analysis_trigger:
             st.error(f"RNFLT Error: {e}")
 
     # ============================================================
-    # B-scan analysis (with validity + confidence threshold)
+    # B-scan analysis (with STRONGER validity + confidence threshold)
     # ============================================================
     if bscan_file:
         try:
@@ -593,11 +600,31 @@ if analysis_trigger:
             is_invalid_bscan = False
             validity_label_b = "Unknown"
 
-            if w < 128 or h < 128:
+            # ---- stronger heuristic for screenshots / random images ----
+            sharp_score = qmeta_bscan.get("sharp_score", 0.0)
+            var_lap = qmeta_bscan.get("var_lap", 0.0)
+
+            # 1. Very small or very large images → unlikely to be cropped OCT slices
+            if w < 128 or h < 64:
                 is_invalid_bscan = True
+            if w > 1400 or h > 1400:   # full-screen screenshots etc.
+                is_invalid_bscan = True
+
+            # 2. Low overall quality
             if q_bscan < 40:
                 is_invalid_bscan = True
-            if qmeta_bscan.get("var_lap", 0) > 6000:
+
+            # 3. Extremely edge-heavy images (UI, text, code, diagrams)
+            if sharp_score > 95:
+                is_invalid_bscan = True
+            if var_lap > 4000:
+                is_invalid_bscan = True
+
+            # 4. Intensity statistics (screenshots often high contrast)
+            arr = np.array(pil).astype(np.float32)
+            mean_int = float(arr.mean())
+            std_int = float(arr.std())
+            if std_int < 8 or std_int > 70:
                 is_invalid_bscan = True
 
             conf_text = ""
@@ -607,7 +634,7 @@ if analysis_trigger:
                 run_conf = 0.0
                 validity_label_b = "Invalid / Out-of-distribution"
                 conf_text = (
-                    "This does not appear to be a typical OCT B-scan (may be a screenshot or non-medical image). "
+                    "This does not appear to be a typical OCT B-scan (may be a screenshot, text, or non-medical image). "
                     "Prediction is suppressed; please upload a valid OCT slice."
                 )
             else:
@@ -649,7 +676,7 @@ if analysis_trigger:
 
             st.markdown(
                 f"**B-scan Quality:** {q_bscan:.1f}% — "
-                f"(sharp:{qmeta_bscan['sharp_score']:.1f}, snr:{qmeta_bscan['snr_score']:.1f})"
+                f"(sharp:{sharp_score:.1f}, snr:{qmeta_bscan['snr_score']:.1f})"
             )
 
             if conf_text:
@@ -670,7 +697,11 @@ if analysis_trigger:
                 hm_color = cv2.applyColorMap(hm, cv2.COLORMAP_JET)
                 overlay = (np.stack([proc]*3, axis=-1) * 255).astype(np.uint8)
                 overlay = cv2.addWeighted(overlay, 0.6, hm_color, 0.4, 0)
-                st.image([pil, overlay], caption=["Original B-Scan", "Grad-CAM Overlay"], use_column_width=True)
+                st.image(
+                    [pil, overlay],
+                    caption=["Original B-Scan", "Grad-CAM Overlay"],
+                    use_column_width=True
+                )
                 fig2, ax2 = plt.subplots(1,2,figsize=(14,6))
                 ax2[0].imshow(pil, cmap='gray'); ax2[0].axis('off'); ax2[0].set_title("B-Scan")
                 ax2[1].imshow(overlay); ax2[1].axis('off'); ax2[1].set_title("Grad-CAM Overlay")
@@ -723,7 +754,10 @@ def build_scan_summary_for_prompt():
         return "No scan loaded in session."
     rm = ctx.get('rnflt_metrics')
     if rm:
-        parts.append(f"RNFLT Mean {rm.get('mean',0):.2f} µm, Std {rm.get('std',0):.2f} µm, Min {rm.get('min',0):.2f}, Max {rm.get('max',0):.2f}.")
+        parts.append(
+            f"RNFLT Mean {rm.get('mean',0):.2f} µm, Std {rm.get('std',0):.2f} µm, "
+            f"Min {rm.get('min',0):.2f}, Max {rm.get('max',0):.2f}."
+        )
     rc = ctx.get('rnflt_cluster')
     if rc:
         parts.append(f"RNFLT label: {rc}.")
@@ -747,7 +781,17 @@ Answer concisely (<= 200 words) and include a brief disclaimer that this is educ
 If user asks to 'explain my scan' or similar, use the provided scan summary context to explain results and provide practical next steps (tests to request, urgency)."""
 
     q_lower = question.lower()
-    include_scan = any(kw in q_lower for kw in ["explain my scan", "explain my result", "explain the scan", "explain my rnflt", "explain my b-scan", "explain this scan"])
+    include_scan = any(
+        kw in q_lower
+        for kw in [
+            "explain my scan",
+            "explain my result",
+            "explain the scan",
+            "explain my rnflt",
+            "explain my b-scan",
+            "explain this scan",
+        ]
+    )
     scan_summary = build_scan_summary_for_prompt() if include_scan else ""
 
     try:
@@ -768,16 +812,23 @@ If user asks to 'explain my scan' or similar, use the provided scan summary cont
             for msg in history[-8:]:
                 role = "User" if msg["role"] == "user" else "Assistant"
                 conversation_context += f"{role}: {msg['content']}\n\n"
-            full_prompt = system_instruction + ("\n\nScan summary: " + scan_summary if include_scan else "") + f"\n\n{conversation_context}User: {question}\n\nAssistant:"
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+            full_prompt = (
+                system_instruction
+                + ("\n\nScan summary: " + scan_summary if include_scan else "")
+                + f"\n\n{conversation_context}User: {question}\n\nAssistant:"
+            )
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                "gemini-2.5-flash:generateContent?key=" + api_key
+            )
             response = requests.post(
                 url,
                 headers={"Content-Type": "application/json"},
                 json={
                     "contents": [{"parts": [{"text": full_prompt}]}],
-                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 500}
+                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 500},
                 },
-                timeout=30
+                timeout=30,
             )
             if response.status_code == 200:
                 data = response.json()
@@ -795,16 +846,32 @@ If user asks to 'explain my scan' or similar, use the provided scan summary cont
 st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
 with st.expander("💬 Ask AI assistant", expanded=False):
     st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:#b8ffb8; font-size:13px; margin-bottom:12px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or request 'explain my scan'</p>", unsafe_allow_html=True)
+    st.markdown(
+        "<p style='text-align:center; color:#b8ffb8; font-size:13px; margin-bottom:12px;'>"
+        "Ask me anything about glaucoma, OCT imaging, RNFLT, or request 'explain my scan'"
+        "</p>",
+        unsafe_allow_html=True,
+    )
 
     for msg in st.session_state.chat_history:
         if msg["role"] == "user":
-            st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>",
+                unsafe_allow_html=True,
+            )
         else:
-            st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>",
+                unsafe_allow_html=True,
+            )
 
-    user_question = st.text_input("Your question:", key="chat_input", placeholder="e.g., Explain my scan; What does RNFLT thinning mean?", label_visibility="collapsed")
-    col1, col2 = st.columns([4,1])
+    user_question = st.text_input(
+        "Your question:",
+        key="chat_input",
+        placeholder="e.g., Explain my scan; What does RNFLT thinning mean?",
+        label_visibility="collapsed",
+    )
+    col1, col2 = st.columns([4, 1])
     with col1:
         send_btn = st.button("📤 Send", use_container_width=True)
     with col2:
@@ -815,9 +882,15 @@ with st.expander("💬 Ask AI assistant", expanded=False):
             st.error("❌ API key not configured. See sidebar.")
         else:
             with st.spinner("🔍 Generating answer..."):
-                st.session_state.chat_history.append({"role": "user", "content": user_question})
-                reply = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
-                st.session_state.chat_history.append({"role": "assistant", "content": reply})
+                st.session_state.chat_history.append(
+                    {"role": "user", "content": user_question}
+                )
+                reply = ask_glaucoma_assistant(
+                    user_question, st.session_state.chat_history, API_KEY
+                )
+                st.session_state.chat_history.append(
+                    {"role": "assistant", "content": reply}
+                )
             try:
                 st.experimental_rerun()
             except Exception:
@@ -830,30 +903,69 @@ with st.expander("💬 Ask AI assistant", expanded=False):
         except Exception:
             pass
 
-st.markdown('</div>', unsafe_allow_html=True)
+st.markdown("</div>", unsafe_allow_html=True)
 
 # ============================================================
 # PDF generation engine (with clinical blue body and QR)
 # ============================================================
-def generate_full_pdf(figs,
-                      rnflt_metrics=None,
-                      rnflt_cluster=None,
-                      rnflt_severity=None,
-                      bscan_label=None,
-                      bscan_conf=None,
-                      quality=None):
+def generate_full_pdf(
+    figs,
+    rnflt_metrics=None,
+    rnflt_cluster=None,
+    rnflt_severity=None,
+    bscan_label=None,
+    bscan_conf=None,
+    quality=None,
+):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=40, bottomMargin=40, leftMargin=50, rightMargin=50)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        topMargin=40,
+        bottomMargin=40,
+        leftMargin=50,
+        rightMargin=50,
+    )
     styles = getSampleStyleSheet()
-    title = ParagraphStyle("TitleGlow", parent=styles["Title"], fontSize=28, textColor=colors.HexColor("#00eaff"), leading=32, alignment=1)
-    subtitle = ParagraphStyle("Subtitle", parent=styles["Heading2"], fontSize=14, textColor=colors.HexColor("#ff40c4"), alignment=1, leading=18)
-    header_green = ParagraphStyle("HeaderGreen", parent=styles["Heading2"], textColor=colors.HexColor("#39ff14"), fontSize=18)
-    clinical_blue = ParagraphStyle("ClinicalBlue", parent=styles["BodyText"], fontSize=11, leading=16, textColor=colors.HexColor("#0b6aff"))
-    body_small_blue = ParagraphStyle("SmallBlue", parent=styles["BodyText"], fontSize=9, leading=12, textColor=colors.HexColor("#0b6aff"))
+    title = ParagraphStyle(
+        "TitleGlow",
+        parent=styles["Title"],
+        fontSize=28,
+        textColor=colors.HexColor("#00eaff"),
+        leading=32,
+        alignment=1,
+    )
+    subtitle = ParagraphStyle(
+        "Subtitle",
+        parent=styles["Heading2"],
+        fontSize=14,
+        textColor=colors.HexColor("#ff40c4"),
+        alignment=1,
+        leading=18,
+    )
+    header_green = ParagraphStyle(
+        "HeaderGreen",
+        parent=styles["Heading2"],
+        textColor=colors.HexColor("#39ff14"),
+        fontSize=18,
+    )
+    clinical_blue = ParagraphStyle(
+        "ClinicalBlue",
+        parent=styles["BodyText"],
+        fontSize=11,
+        leading=16,
+        textColor=colors.HexColor("#0b6aff"),
+    )
+    body_small_blue = ParagraphStyle(
+        "SmallBlue",
+        parent=styles["BodyText"],
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#0b6aff"),
+    )
 
     story = []
 
-    # COVER
     story.append(Paragraph("OCULAIRE", title))
     story.append(Paragraph("AI-Powered Glaucoma Screening Report", subtitle))
     story.append(Spacer(1, 12))
@@ -863,25 +975,41 @@ def generate_full_pdf(figs,
 
     metadata = [
         ["Report Generated:", gen_date],
-        ["Analysis Type:", "RNFLT + B-Scan" if (figs and len(figs)>0) else "RNFLT or B-Scan"],
+        [
+            "Analysis Type:",
+            "RNFLT + B-Scan" if (figs and len(figs) > 0) else "RNFLT or B-Scan",
+        ],
         ["AI Model Version:", "OCULAIRE v5.0 (2024)"],
         ["Report ID:", report_id],
     ]
     meta_table = Table(metadata, colWidths=[150, 300])
-    meta_table.setStyle(TableStyle([
-        ("BACKGROUND",(0,0),(-1,-1), colors.Color(0.05,0.05,0.08)),
-        ("TEXTCOLOR",(0,0),(-1,-1), colors.HexColor("#e6faff")),
-        ("INNERGRID",(0,0),(-1,-1),0.3, colors.HexColor("#00eaff")),
-        ("BOX",(0,0),(-1,-1),1, colors.HexColor("#00eaff")),
-    ]))
+    meta_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.Color(0.05, 0.05, 0.08)),
+                ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#e6faff")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#00eaff")),
+                ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#00eaff")),
+            ]
+        )
+    )
     story.append(meta_table)
     story.append(Spacer(1, 12))
 
     if (rnflt_cluster == "Glaucoma-like") or (bscan_label == "Glaucoma-like"):
         risk_color = colors.HexColor("#ff6b6b")
         risk_text = "⚠️ ABNORMAL PATTERNS DETECTED"
-        risk_level = ("HIGH" if (rnflt_severity or 0) >= 60 else "MODERATE" if (rnflt_severity or 0) >= 30 else "LOW-MODERATE")
-    elif (rnflt_cluster == "Invalid / Non-RNFLT Input") or (bscan_label == "Invalid / Non-OCT Input"):
+        risk_level = (
+            "HIGH"
+            if (rnflt_severity or 0) >= 60
+            else "MODERATE"
+            if (rnflt_severity or 0) >= 30
+            else "LOW-MODERATE"
+        )
+    elif (
+        rnflt_cluster == "Invalid / Non-RNFLT Input"
+        or bscan_label == "Invalid / Non-OCT Input"
+    ):
         risk_color = colors.HexColor("#ffaa00")
         risk_text = "⚠️ INVALID / LOW-QUALITY INPUT"
         risk_level = "UNRELIABLE"
@@ -896,18 +1024,22 @@ def generate_full_pdf(figs,
         f"<br/><b>Severity Index:</b> {(rnflt_severity or 0):.1f}%"
         f"<br/><b>CNN Confidence:</b> {(bscan_conf or 0):.1f}%"
         f"<br/><b>Overall Scan Quality:</b> {(quality or 0):.1f}%",
-        clinical_blue
+        clinical_blue,
     )
     box_table = Table([[exec_para]], colWidths=[450])
-    box_table.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,-1), risk_color),
-        ("TEXTCOLOR", (0,0), (-1,-1), colors.white),
-        ("BOX", (0,0), (-1,-1), 1.5, colors.black),
-        ("LEFTPADDING", (0,0), (-1,-1), 12),
-        ("RIGHTPADDING", (0,0), (-1,-1), 12),
-        ("TOPPADDING", (0,0), (-1,-1), 10),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 10),
-    ]))
+    box_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), risk_color),
+                ("TEXTCOLOR", (0, 0), (-1, -1), colors.white),
+                ("BOX", (0, 0), (-1, -1), 1.5, colors.black),
+                ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                ("TOPPADDING", (0, 0), (-1, -1), 10),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+            ]
+        )
+    )
     story.append(box_table)
     story.append(Spacer(1, 12))
 
@@ -918,7 +1050,7 @@ def generate_full_pdf(figs,
             qr_buf = io.BytesIO()
             qr.save(qr_buf, format="PNG")
             qr_buf.seek(0)
-            img = RLImage(qr_buf, width=1.25*inch, height=1.25*inch)
+            img = RLImage(qr_buf, width=1.25 * inch, height=1.25 * inch)
             story.append(Spacer(1, 6))
             story.append(img)
             story.append(Spacer(1, 6))
@@ -931,53 +1063,60 @@ def generate_full_pdf(figs,
     story.append(Spacer(1, 10))
 
     if rnflt_cluster == "Invalid / Non-RNFLT Input" or bscan_label == "Invalid / Non-OCT Input":
-        story.append(Paragraph(
-            "One or more uploaded images were detected as <b>invalid or non-standard ophthalmic inputs</b>. "
-            "The AI system has flagged these scans as low-confidence, and the findings should not be interpreted as a clinical diagnosis. "
-            "Please repeat the scan with proper OCT images for reliable assessment.",
-            clinical_blue
-        ))
+        story.append(
+            Paragraph(
+                "One or more uploaded images were detected as <b>invalid or non-standard ophthalmic inputs</b>. "
+                "The AI system has flagged these scans as low-confidence, and the findings should not be interpreted as a clinical diagnosis. "
+                "Please repeat the scan with proper OCT images for reliable assessment.",
+                clinical_blue,
+            )
+        )
     elif rnflt_cluster == "Glaucoma-like":
-        story.append(Paragraph(
-            "The AI analysis has detected <b>patterns consistent with glaucomatous changes</b> in your retinal nerve fiber layer structure. "
-            "This includes thinning relative to the healthy reference database.",
-            clinical_blue
-        ))
+        story.append(
+            Paragraph(
+                "The AI analysis has detected <b>patterns consistent with glaucomatous changes</b> in your retinal nerve fiber layer structure. "
+                "This includes thinning relative to the healthy reference database.",
+                clinical_blue,
+            )
+        )
     else:
-        story.append(Paragraph(
-            "The retinal nerve fiber layer thickness pattern appears <b>within normal ranges</b>. "
-            "No significant signs of glaucomatous thinning are identified.",
-            clinical_blue
-        ))
+        story.append(
+            Paragraph(
+                "The retinal nerve fiber layer thickness pattern appears <b>within normal ranges</b>. "
+                "No significant signs of glaucomatous thinning are identified.",
+                clinical_blue,
+            )
+        )
 
     story.append(Spacer(1, 10))
-    story.append(Paragraph("<b>Key Findings</b>", clinical_blue)); story.append(Spacer(1,6))
+    story.append(Paragraph("<b>Key Findings</b>", clinical_blue))
+    story.append(Spacer(1, 6))
 
     if rnflt_cluster == "Invalid / Non-RNFLT Input" or bscan_label == "Invalid / Non-OCT Input":
         findings = [
             "- One or more scans were flagged as invalid/low-quality by the AI quality checks.",
             "- RNFLT/B-scan interpretation may not be reliable for this input.",
-            "- A repeat scan with correct OCT imaging is recommended before drawing conclusions."
+            "- A repeat scan with correct OCT imaging is recommended before drawing conclusions.",
         ]
     elif rnflt_cluster == "Glaucoma-like":
         findings = [
             "- RNFL thinning detected in critical sectors.",
-            f"- { (rnflt_severity or 0):.1f }% of retinal area flagged as at-risk.",
+            f"- {(rnflt_severity or 0):.1f}% of retinal area flagged as at-risk.",
             "- Pattern deviation from healthy baseline exceeds threshold.",
-            "- Suggestive of early-to-moderate glaucomatous damage."
+            "- Suggestive of early-to-moderate glaucomatous damage.",
         ]
     else:
         findings = [
             "- RNFL thickness within expected clinical ranges.",
             "- No significant thinning detected.",
-            "- Pattern matches healthy reference population."
+            "- Pattern matches healthy reference population.",
         ]
     for f in findings:
         story.append(Paragraph(f, clinical_blue))
-    story.append(Spacer(1,12))
+    story.append(Spacer(1, 12))
 
     story.append(Paragraph("<b>RNFLT Measurements</b>", header_green))
-    story.append(Spacer(1,8))
+    story.append(Spacer(1, 8))
     if rnflt_metrics:
         rnflt_tbl = [
             ["Mean Thickness", f"{rnflt_metrics.get('mean',0):.2f} μm"],
@@ -985,73 +1124,109 @@ def generate_full_pdf(figs,
             ["Minimum", f"{rnflt_metrics.get('min',0):.2f} μm"],
             ["Maximum", f"{rnflt_metrics.get('max',0):.2f} μm"],
         ]
-        rnflt_table = Table(rnflt_tbl, colWidths=[200,200])
-        rnflt_table.setStyle(TableStyle([
-            ("BACKGROUND",(0,0),(-1,-1), colors.Color(0.02,0.05,0.18)),
-            ("TEXTCOLOR",(0,0),(-1,-1), colors.HexColor("#0b6aff")),
-            ("GRID",(0,0),(-1,-1),0.5, colors.HexColor("#00eaff")),
-        ]))
+        rnflt_table = Table(rnflt_tbl, colWidths=[200, 200])
+        rnflt_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.Color(0.02, 0.05, 0.18)),
+                    ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#0b6aff")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#00eaff")),
+                ]
+            )
+        )
         story.append(rnflt_table)
     story.append(PageBreak())
 
     story.append(Paragraph("DETAILED VISUAL ANALYSIS", header_green))
-    story.append(Spacer(1,8))
+    story.append(Spacer(1, 8))
     for fig in figs or []:
         try:
             png = fig_to_png(fig)
-            img = RLImage(io.BytesIO(png), width=6.5*inch, height=3.2*inch)
+            img = RLImage(io.BytesIO(png), width=6.5 * inch, height=3.2 * inch)
             story.append(img)
-            story.append(Spacer(1,12))
+            story.append(Spacer(1, 12))
         except Exception:
             pass
     story.append(PageBreak())
 
-    story.append(Paragraph("SYMPTOMS & RISK FACTORS", header_green)); story.append(Spacer(1,8))
+    story.append(Paragraph("SYMPTOMS & RISK FACTORS", header_green))
+    story.append(Spacer(1, 8))
     story.append(Paragraph("<b>Symptoms to Monitor</b>", clinical_blue))
-    symptoms = ["Gradual peripheral vision loss", "Blurred vision or halos", "Difficulty adjusting to darkness", "Eye discomfort or headaches"]
-    for s in symptoms: story.append(Paragraph(f"- {s}", clinical_blue))
-    story.append(Spacer(1,8))
+    symptoms = [
+        "Gradual peripheral vision loss",
+        "Blurred vision or halos",
+        "Difficulty adjusting to darkness",
+        "Eye discomfort or headaches",
+    ]
+    for s in symptoms:
+        story.append(Paragraph(f"- {s}", clinical_blue))
+    story.append(Spacer(1, 8))
     story.append(Paragraph("<b>Major Risk Factors</b>", clinical_blue))
-    risks = ["Age >60", "Family history", "High IOP", "Thin corneas", "High myopia", "Diabetes / Hypertension"]
-    for r in risks: story.append(Paragraph(f"- {r}", clinical_blue))
+    risks = [
+        "Age >60",
+        "Family history",
+        "High IOP",
+        "Thin corneas",
+        "High myopia",
+        "Diabetes / Hypertension",
+    ]
+    for r in risks:
+        story.append(Paragraph(f"- {r}", clinical_blue))
     story.append(PageBreak())
 
-    story.append(Paragraph("RECOMMENDATIONS & ACTION PLAN", header_green)); story.append(Spacer(1,8))
+    story.append(Paragraph("RECOMMENDATIONS & ACTION PLAN", header_green))
+    story.append(Spacer(1, 8))
     if rnflt_cluster == "Glaucoma-like":
         recs = [
             "Schedule ophthalmologist visit within 1–2 weeks.",
             "Request tonometry, visual fields, gonioscopy and dilated optic nerve exam.",
-            "Bring this report and prior eye records to your appointment."
+            "Bring this report and prior eye records to your appointment.",
         ]
     elif rnflt_cluster == "Invalid / Non-RNFLT Input" or bscan_label == "Invalid / Non-OCT Input":
         recs = [
             "Repeat OCT imaging with proper fixation and scan alignment.",
             "Ensure that correct RNFLT/B-scan exports are uploaded (not screenshots or photos).",
-            "Consult an ophthalmologist for formal interpretation of valid OCT scans."
+            "Consult an ophthalmologist for formal interpretation of valid OCT scans.",
         ]
     else:
         recs = [
             "Continue routine annual eye exams.",
             "Document this baseline for future comparison.",
-            "Consider earlier follow-up if any new visual symptoms occur."
+            "Consider earlier follow-up if any new visual symptoms occur.",
         ]
-    for r in recs: story.append(Paragraph(f"- {r}", clinical_blue))
-    story.append(Spacer(1,8))
+    for r in recs:
+        story.append(Paragraph(f"- {r}", clinical_blue))
+    story.append(Spacer(1, 8))
     story.append(Paragraph("<b>Lifestyle Recommendations</b>", clinical_blue))
-    lifestyle = ["Antioxidant-rich diet", "Regular aerobic activity", "Protect from UV exposure", "Limit caffeine, avoid smoking", "Sleep 7–9 hours"]
-    for l in lifestyle: story.append(Paragraph(f"- {l}", clinical_blue))
+    lifestyle = [
+        "Antioxidant-rich diet",
+        "Regular aerobic activity",
+        "Protect from UV exposure",
+        "Limit caffeine, avoid smoking",
+        "Sleep 7–9 hours",
+    ]
+    for l in lifestyle:
+        story.append(Paragraph(f"- {l}", clinical_blue))
     story.append(PageBreak())
 
-    story.append(Paragraph("IMPORTANT MEDICAL DISCLAIMER", header_green)); story.append(Spacer(1,8))
-    story.append(Paragraph(
-        "This OCULAIRE report is generated by an AI screening tool for research and educational purposes only. "
-        "It is not a clinical diagnosis. Always consult an ophthalmologist for medical decisions.",
-        clinical_blue
-    ))
-    story.append(Spacer(1,8))
+    story.append(Paragraph("IMPORTANT MEDICAL DISCLAIMER", header_green))
+    story.append(Spacer(1, 8))
+    story.append(
+        Paragraph(
+            "This OCULAIRE report is generated by an AI screening tool for research and educational purposes only. "
+            "It is not a clinical diagnosis. Always consult an ophthalmologist for medical decisions.",
+            clinical_blue,
+        )
+    )
+    story.append(Spacer(1, 8))
     story.append(Paragraph("<b>Methodology & References</b>", header_green))
-    refs = ["Weinreb RN et al., JAMA 2014", "Tham YC et al., Ophthalmology 2014", "European Glaucoma Society Guidelines 2021"]
-    for ref in refs: story.append(Paragraph(f"- {ref}", body_small_blue))
+    refs = [
+        "Weinreb RN et al., JAMA 2014",
+        "Tham YC et al., Ophthalmology 2014",
+        "European Glaucoma Society Guidelines 2021",
+    ]
+    for ref in refs:
+        story.append(Paragraph(f"- {ref}", body_small_blue))
 
     doc.build(story)
     buffer.seek(0)
@@ -1072,7 +1247,7 @@ if st.session_state.get("trigger_pdf", False):
                 rnflt_severity=stored_ctx.get("rnflt_severity"),
                 bscan_label=stored_ctx.get("bscan_label"),
                 bscan_conf=stored_ctx.get("bscan_conf"),
-                quality=stored_ctx.get("quality")
+                quality=stored_ctx.get("quality"),
             )
             st.markdown("<hr>", unsafe_allow_html=True)
             st.subheader("📄 Download Full OCULAIRE Medical Report")
@@ -1081,14 +1256,19 @@ if st.session_state.get("trigger_pdf", False):
                 data=final_pdf,
                 file_name="OCULAIRE_Full_Report.pdf",
                 mime="application/pdf",
-                use_container_width=True
+                use_container_width=True,
             )
         except Exception as e:
             st.error(f"PDF generation error: {e}")
     else:
-        st.warning("No visuals found to create a full report. Upload RNFLT or B-scan and generate again.")
+        st.warning(
+            "No visuals found to create a full report. Upload RNFLT or B-scan and generate again."
+        )
     st.session_state["trigger_pdf"] = False
 
 # Footer
 st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center;color:#b8ffb8;padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
+st.markdown(
+    "<div style='text-align:center;color:#b8ffb8;padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>",
+    unsafe_allow_html=True,
+)
