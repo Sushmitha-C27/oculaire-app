@@ -534,10 +534,31 @@ if analysis_trigger:
             # compute quality
             q_bscan, qmeta_bscan = compute_quality_from_image_pil(pil)
 
+            conf_text = ""
             if b_model is not None:
                 pred_raw = float(b_model.predict(batch, verbose=0)[0][0])
-                run_label_b = "Glaucoma-like" if pred_raw > 0.5 else "Healthy-like"
-                run_conf = pred_raw*100 if run_label_b == "Glaucoma-like" else (1 - pred_raw)*100
+                prob_glaucoma = pred_raw
+                prob_healthy = 1.0 - prob_glaucoma
+
+                HIGH_THR = 0.6
+                LOW_THR = 0.4
+
+                if prob_glaucoma >= HIGH_THR:
+                    run_label_b = "Glaucoma-like"
+                    run_conf = prob_glaucoma * 100
+                    conf_text = "High confidence prediction for glaucoma-like pattern."
+                elif prob_glaucoma <= LOW_THR:
+                    run_label_b = "Healthy-like"
+                    run_conf = prob_healthy * 100
+                    conf_text = "High confidence prediction for healthy-like pattern."
+                else:
+                    run_label_b = "Uncertain"
+                    run_conf = max(prob_glaucoma, prob_healthy) * 100
+                    conf_text = (
+                        "Borderline / low-confidence prediction. "
+                        "This scan may be noisy, low-quality, or not a typical OCT B-scan. "
+                        "Interpret with caution."
+                    )
             else:
                 run_label_b = "Unknown"
                 run_conf = 0.0
@@ -548,6 +569,14 @@ if analysis_trigger:
             col1.metric("CNN Prediction", run_label_b)
             col2.metric("Confidence", f"{run_conf:.2f}%")
             st.markdown(f"**B-scan Quality:** {q_bscan:.1f}% — (sharp:{qmeta_bscan['sharp_score']:.1f}, snr:{qmeta_bscan['snr_score']:.1f})")
+
+            if conf_text:
+                st.markdown(f"*{conf_text}*")
+
+            # Extra warning for very low quality scans
+            if q_bscan < 40:
+                st.warning("⚠️ Low-quality or atypical scan detected. Model output may be unreliable or non-OCT.")
+
             st.markdown(render_severity(run_conf), unsafe_allow_html=True)
 
             heat = gradcam(batch, b_model) if b_model else None
