@@ -497,95 +497,126 @@ if analysis_trigger:
     # ============================================================
     # RNFLT analysis  (with strict validity check)
     # ============================================================
-    if rnflt_arr is not None:
-        try:
-            metrics = rnflt_metrics or {}
+    # ============================================================
+# RNFLT analysis  (tuned validity check)
+# ============================================================
+if rnflt_arr is not None:
+    try:
+        metrics = rnflt_metrics or {}
 
-            q_rnflt, qmeta_rnflt = compute_quality_from_array(rnflt_arr)
+        # Quality first
+        q_rnflt, qmeta_rnflt = compute_quality_from_array(rnflt_arr)
 
-            is_invalid_rnflt = False
-            m_mean = metrics.get("mean", 0.0)
-            m_std  = metrics.get("std", 0.0)
-            m_min  = metrics.get("min", 0.0)
-            m_max  = metrics.get("max", 0.0)
+        is_invalid_rnflt = False
+        m_mean = metrics.get("mean", 0.0)
+        m_std  = metrics.get("std", 0.0)
+        m_min  = metrics.get("min", 0.0)
+        m_max  = metrics.get("max", 0.0)
 
-            if (m_mean < 40) or (m_mean > 120):
-                is_invalid_rnflt = True
-            if (m_std < 5) or (m_std > 60):
-                is_invalid_rnflt = True
-            if (m_min < 0) or (m_max > 250):
-                is_invalid_rnflt = True
-            if q_rnflt < 40:
-                is_invalid_rnflt = True
-            if qmeta_rnflt.get("var_lap", 0.0) > 4000:
-                is_invalid_rnflt = True
+        # 1) Physiological RNFLT sanity range
+        #    Typical global averages: ~70–110 µm, but allow wider margin.
+        if (m_mean < 35) or (m_mean > 140):
+            is_invalid_rnflt = True
 
-            if is_invalid_rnflt:
-                run_label_r = "Invalid / Non-RNFLT Input"
-                cluster = "N/A"
-                validity_label_r = "Invalid / Out-of-distribution"
+        # 2) Variation too flat or insanely noisy
+        #    Allow up to ~80 µm std to avoid killing real scans.
+        if (m_std < 3) or (m_std > 80):
+            is_invalid_rnflt = True
 
+        # 3) Value bounds (allow up to 300 µm max just in case)
+        if (m_min < 0) or (m_max > 300):
+            is_invalid_rnflt = True
+
+        # 4) Very low overall image quality → likely screenshot / junk
+        if q_rnflt < 40:
+            is_invalid_rnflt = True
+
+        # 5) Make sure there is a reasonable number of valid pixels
+        finite_count = int(np.isfinite(rnflt_arr).sum())
+        if finite_count < 1000:   # tiny or mostly-NaN images
+            is_invalid_rnflt = True
+
+        # NOTE: we intentionally do NOT use var_lap for RNFLT anymore,
+        # because RNFLT maps can have high edge variance around the disc.
+
+        if is_invalid_rnflt:
+            run_label_r = "Invalid / Non-RNFLT Input"
+            cluster = "N/A"
+            validity_label_r = "Invalid / Out-of-distribution"
+
+            diff = rnflt_arr - np.nanmean(rnflt_arr)
+            risk = np.full_like(rnflt_arr, np.nan)
+            sev = 0.0
+
+            st.error(
+                "⚠️ This does not appear to be a valid RNFLT thickness map, or it is far "
+                "outside the distribution of the training data. RNFLT clustering is "
+                "skipped and this result should not be used for diagnosis."
+            )
+        else:
+            validity_label_r = "Likely Valid RNFLT"
+
+            if scaler is not None and kmeans is not None and metrics:
+                X = np.array([[metrics["mean"], metrics["std"],
+                               metrics["min"], metrics["max"]]])
+                Xs = scaler.transform(X)
+                cluster = int(kmeans.predict(Xs)[0])
+                run_label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
+            else:
+                cluster = "?"
+                run_label_r = "Unknown"
+
+            if avg_healthy is not None:
+                diff, risk, sev = compute_risk_map(rnflt_arr, avg_healthy, -threshold)
+            else:
                 diff = rnflt_arr - np.nanmean(rnflt_arr)
-                risk = np.full_like(rnflt_arr, np.nan)
+                risk = np.where(diff < -threshold, diff, np.nan)
                 sev = 0.0
 
-                st.error(
-                    "⚠️ This does **not** appear to be a valid RNFLT thickness map. "
-                    "It may be a screenshot, non-OCT image, or extremely atypical scan. "
-                    "RNFLT clustering is skipped and this result should not be used for diagnosis."
-                )
-            else:
-                validity_label_r = "Likely Valid RNFLT"
+        # Update global severity only for valid RNFLT
+        if not is_invalid_rnflt:
+            run_severity = max(run_severity, sev)
 
-                if scaler is not None and kmeans is not None and metrics:
-                    X = np.array([[metrics["mean"], metrics["std"], metrics["min"], metrics["max"]]])
-                    Xs = scaler.transform(X)
-                    cluster = int(kmeans.predict(Xs)[0])
-                    run_label_r = "Glaucoma-like" if cluster == thin_cluster else "Healthy-like"
-                else:
-                    cluster = "?"
-                    run_label_r = "Unknown"
+        # Metrics display
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("RNFLT Status", run_label_r)
+        if metrics:
+            c2.metric("Mean RNFLT", f"{metrics['mean']:.2f}")
+            c3.metric("Std Dev", f"{metrics['std']:.2f}")
+        else:
+            c2.metric("Mean RNFLT", "-")
+            c3.metric("Std Dev", "-")
+        c4.metric("Cluster", str(cluster))
 
-                if avg_healthy is not None:
-                    diff, risk, sev = compute_risk_map(rnflt_arr, avg_healthy, -threshold)
-                else:
-                    diff = rnflt_arr - np.nanmean(rnflt_arr)
-                    risk = np.where(diff < -threshold, diff, np.nan)
-                    sev = 0.0
+        st.metric("RNFLT Input Validity", validity_label_r)
+        st.markdown(
+            f"**RNFLT Scan Quality:** {q_rnflt:.1f}% — "
+            f"(sharp:{qmeta_rnflt['sharp_score']:.1f}, "
+            f"snr:{qmeta_rnflt['snr_score']:.1f})"
+        )
 
-            if not is_invalid_rnflt:
-                run_severity = max(run_severity, sev)
+        # Plots
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        im0 = axes[0].imshow(rnflt_arr, cmap='turbo')
+        axes[0].axis('off'); axes[0].set_title("RNFLT Map")
+        plt.colorbar(im0, ax=axes[0], shrink=0.85)
 
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("RNFLT Status", run_label_r)
-            if metrics:
-                c2.metric("Mean RNFLT", f"{metrics['mean']:.2f}")
-                c3.metric("Std Dev", f"{metrics['std']:.2f}")
-            else:
-                c2.metric("Mean RNFLT", "-")
-                c3.metric("Std Dev", "-")
-            c4.metric("Cluster", str(cluster))
+        im1 = axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30)
+        axes[1].axis('off'); axes[1].set_title("Difference vs Healthy")
+        plt.colorbar(im1, ax=axes[1], shrink=0.85)
 
-            st.metric("RNFLT Input Validity", validity_label_r)
-            st.markdown(
-                f"**RNFLT Scan Quality:** {q_rnflt:.1f}% — "
-                f"(sharp:{qmeta_rnflt['sharp_score']:.1f}, snr:{qmeta_rnflt['snr_score']:.1f})"
-            )
+        im2 = axes[2].imshow(risk, cmap='hot')
+        axes[2].axis('off'); axes[2].set_title("Risk Map")
+        plt.colorbar(im2, ax=axes[2], shrink=0.85)
 
-            fig, axes = plt.subplots(1, 3, figsize=(18,6))
-            im0 = axes[0].imshow(rnflt_arr, cmap='turbo'); axes[0].axis('off'); axes[0].set_title("RNFLT Map")
-            plt.colorbar(im0, ax=axes[0], shrink=0.85)
-            im1 = axes[1].imshow(diff, cmap='bwr', vmin=-30, vmax=30); axes[1].axis('off'); axes[1].set_title("Difference vs Healthy")
-            plt.colorbar(im1, ax=axes[1], shrink=0.85)
-            im2 = axes[2].imshow(risk, cmap='hot'); axes[2].axis('off'); axes[2].set_title("Risk Map")
-            plt.colorbar(im2, ax=axes[2], shrink=0.85)
-            fig.patch.set_facecolor("#020802")
-            st.pyplot(fig)
-            run_figs.append(fig)
+        fig.patch.set_facecolor("#020802")
+        st.pyplot(fig)
+        run_figs.append(fig)
 
-            run_rnflt_metrics = metrics
-        except Exception as e:
-            st.error(f"RNFLT Error: {e}")
+        run_rnflt_metrics = metrics
+    except Exception as e:
+        st.error(f"RNFLT Error: {e}")
+
 
     # ============================================================
     # B-scan analysis (with STRONGER validity + confidence threshold)
