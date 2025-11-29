@@ -1,6 +1,7 @@
 # ============================================================
 #  OCULAIRE — Neon Green UI + Fast Glow Header + Chatbot
 #  Extended: Scan Quality Score + Improved Chatbot (explain scan) + QR code in PDF
+#  + Intro Splash: "Welcome to OCULAIRE" with kid & grandpa walking on loading bar
 # ============================================================
 
 import streamlit as st
@@ -52,7 +53,7 @@ st.set_page_config(
 )
 
 # -----------------------
-# Neon Green Theme + Fast Glow Header (UI)
+# Neon Green Theme + Intro Splash + Fast Glow Header
 # -----------------------
 st.markdown("""
 <style>
@@ -90,7 +91,7 @@ label, h2, h3, h4, h5 {
   color: var(--green) !important;
 }
 
-/* FAST intense neon pulse */
+/* FAST intense neon pulse for main title */
 @keyframes intenseGlow {
   0% { transform: scale(1); text-shadow: 0 0 18px var(--green), 0 0 30px var(--green); }
   25% { transform: scale(1.06); text-shadow: 0 0 32px var(--green), 0 0 55px var(--green); }
@@ -120,27 +121,193 @@ label, h2, h3, h4, h5 {
   color: #e8ffe8;
 }
 
+/* ================================
+   INTRO OVERLAY (WELCOME SCREEN)
+   ================================ */
+#oculaire_intro {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: radial-gradient(circle at 20% 20%, #003300, #000000 85%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  animation: introFadeOut 0.6s ease-out 3.2s forwards;
+}
+
+@keyframes introFadeOut {
+  to {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+.intro-inner {
+  text-align: center;
+  max-width: 520px;
+  padding: 24px 18px;
+  border-radius: 20px;
+  background: rgba(0,0,0,0.75);
+  box-shadow: 0 0 30px rgba(0,255,0,0.3);
+  border: 1px solid rgba(0,255,0,0.4);
+}
+
+.intro-kicker {
+  font-size: 14px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #88ff88;
+  margin-bottom: 6px;
+}
+
+/* Jumping "OCULAIRE" title */
+.intro-title {
+  font-size: clamp(32px, 4.5vw, 52px);
+  font-weight: 900;
+  letter-spacing: 6px;
+  color: #ccffcc;
+  margin-bottom: 8px;
+  white-space: nowrap;
+}
+.intro-title span {
+  display: inline-block;
+  animation: letterJump 0.65s ease-in-out infinite;
+}
+.intro-title span:nth-child(1) { animation-delay: 0s; }
+.intro-title span:nth-child(2) { animation-delay: 0.05s; }
+.intro-title span:nth-child(3) { animation-delay: 0.10s; }
+.intro-title span:nth-child(4) { animation-delay: 0.15s; }
+.intro-title span:nth-child(5) { animation-delay: 0.20s; }
+.intro-title span:nth-child(6) { animation-delay: 0.25s; }
+.intro-title span:nth-child(7) { animation-delay: 0.30s; }
+.intro-title span:nth-child(8) { animation-delay: 0.35s; }
+
+@keyframes letterJump {
+  0%,100% { transform: translateY(0); }
+  50%     { transform: translateY(-8px); }
+}
+
+.intro-tagline {
+  font-size: 13px;
+  color: #aaffaa;
+  margin-bottom: 16px;
+}
+
+/* Progress bar with kid + grandpa walking */
+.progress-track {
+  position: relative;
+  width: min(420px, 70vw);
+  height: 12px;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+  box-shadow: 0 0 12px rgba(0,255,0,0.4);
+}
+
+.progress-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  background: linear-gradient(90deg, #39ff14, #b8ff8a);
+  animation: fillBar 3s ease-out forwards;
+}
+
+@keyframes fillBar {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+.walker {
+  position: absolute;
+  top: -20px;
+  font-size: 22px;
+  filter: drop-shadow(0 0 6px rgba(0,0,0,0.7));
+}
+.walker.kid {
+  animation: walkKid 3s linear forwards;
+}
+.walker.grandpa {
+  animation: walkGrandpa 3s linear forwards;
+  animation-delay: 0.4s;
+}
+
+/* They "walk" along the bar */
+@keyframes walkKid {
+  from { transform: translateX(0); }
+  to   { transform: translateX(calc(100% - 26px)); }
+}
+@keyframes walkGrandpa {
+  from { transform: translateX(0); }
+  to   { transform: translateX(calc(100% - 26px)); }
+}
+
+.intro-note {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #88ff88;
+}
+
+/* Main header after intro */
+.main-header {
+  text-align:center;
+  margin-top:20px;
+}
+.main-header h1 {
+  font-size:72px;
+  font-weight:900;
+  letter-spacing:12px;
+  background: linear-gradient(90deg, #39ff14, #b8ff8a);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  animation: intenseGlow 1.4s infinite ease-in-out;
+}
+.main-header h3 {
+  color:#aaffaa;
+  margin-top:-10px;
+}
+
 </style>
+""", unsafe_allow_html=True)
 
-<!-- FAST GLOWING NEON TITLE -->
-<div style='text-align:center; margin-top:20px;'>
-  <h1 style="
-    font-size:72px;
-    font-weight:900;
-    letter-spacing:12px;
-    background: linear-gradient(90deg, #39ff14, #b8ff8a);
-    -webkit-background-clip:text;
-    -webkit-text-fill-color:transparent;
-    animation: intenseGlow 1.4s infinite ease-in-out;
-  ">
-    OCULAIRE
-  </h1>
+# Intro overlay HTML (kid + grandpa walking)
+st.markdown("""
+<div id="oculaire_intro">
+  <div class="intro-inner">
+    <div class="intro-kicker">WELCOME TO</div>
+    <div class="intro-title">
+      <span>O</span><span>C</span><span>U</span><span>L</span><span>A</span><span>I</span><span>R</span><span>E</span>
+    </div>
+    <div class="intro-tagline">
+      AI glaucoma lab for every generation 👶🧓
+    </div>
 
-  <h3 style="color:#aaffaa; margin-top:-10px;">
-    Illuminating Vision. Detecting Glaucoma.
-  </h3>
+    <div class="progress-track">
+      <div class="progress-fill"></div>
+      <div class="walker kid">🧒</div>
+      <div class="walker grandpa">🧓</div>
+    </div>
+
+    <div class="intro-note">
+      Loading your OCULAIRE workspace…
+    </div>
+  </div>
 </div>
 
+<script>
+// Hard hide as fallback after animation
+setTimeout(function() {
+  var intro = document.getElementById("oculaire_intro");
+  if (intro) { intro.style.display = "none"; }
+}, 3600);
+</script>
+
+<div class="main-header">
+  <h1>OCULAIRE</h1>
+  <h3>Illuminating Vision. Detecting Glaucoma.</h3>
+</div>
 """, unsafe_allow_html=True)
 
 # -----------------------
@@ -307,7 +474,6 @@ def estimate_snr(img_gray):
     if std_noise < 1e-6:
         return 100.0
     snr = mean_signal / std_noise
-    # map SNR to 0..100
     snr_score = 100 * (np.tanh((snr - 1.0) / 1.5) * 0.5 + 0.5)
     return float(np.clip(snr_score, 0, 100))
 
@@ -324,7 +490,11 @@ def compute_quality_from_image_pil(pil_img):
         snr_s = estimate_snr(np.array(gray))
         sharp_s, var_lap = estimate_sharpness(gray)
         combined = 0.6 * sharp_s + 0.4 * snr_s
-        return float(np.clip(combined, 0, 100)), {"snr_score": snr_s, "sharp_score": sharp_s, "var_lap": var_lap}
+        return float(np.clip(combined, 0, 100)), {
+            "snr_score": snr_s,
+            "sharp_score": sharp_s,
+            "var_lap": var_lap
+        }
     except Exception:
         return 0.0, {"snr_score": 0.0, "sharp_score": 0.0, "var_lap": 0.0}
 
@@ -365,12 +535,12 @@ def render_severity(pct):
     </div>
 
     <script>
-    setTimeout(function(){{
+    setTimeout(function(){
         var el = document.getElementById("sev_inner");
-        if (el) {{
+        if (el) {
             el.style.width = "{pct:.1f}%";
-        }}
-    }}, 80);
+        }
+    }, 80);
     </script>
     """
     return html
@@ -390,7 +560,11 @@ with st.sidebar:
     st.markdown("## 🩺 RNFLT Input & Tools")
     rnflt_input_mode = st.radio("RNFLT input type", ["NPZ (recommended)", "Single Image"]) 
 
-    rnflt_conv = st.file_uploader("Upload RNFLT slices → convert to .npz", accept_multiple_files=True, type=["png","jpg","jpeg"]) 
+    rnflt_conv = st.file_uploader(
+        "Upload RNFLT slices → convert to .npz",
+        accept_multiple_files=True,
+        type=["png","jpg","jpeg"]
+    ) 
     if rnflt_conv:
         if st.button("Convert RNFLT slices to NPZ"):
             data, shape = convert_images_to_npz(rnflt_conv)
@@ -402,7 +576,11 @@ with st.sidebar:
     st.markdown("## 👁️ B-Scan Input & Tools")
     bscan_input_mode = st.radio("B-scan input type", ["Image (recommended)", "NPZ (multi-slice)"])
 
-    bscan_conv = st.file_uploader("Upload B-scan slices → convert to .npz", accept_multiple_files=True, type=["png","jpg","jpeg"]) 
+    bscan_conv = st.file_uploader(
+        "Upload B-scan slices → convert to .npz",
+        accept_multiple_files=True,
+        type=["png","jpg","jpeg"]
+    ) 
     if bscan_conv:
         if st.button("Convert B-scan slices to NPZ"):
             data, shape = convert_images_to_npz(bscan_conv)
@@ -431,7 +609,11 @@ with colA:
         if rnflt_file:
             rnflt_arr, rnflt_metrics = process_npz(rnflt_file)
     else:
-        rnflt_image = st.file_uploader("Upload single RNFLT image", type=["png","jpg","jpeg"], key="rnflt_img_main")
+        rnflt_image = st.file_uploader(
+            "Upload single RNFLT image",
+            type=["png","jpg","jpeg"],
+            key="rnflt_img_main"
+        )
         if rnflt_image:
             pil = Image.open(rnflt_image).convert("L")
             arr = np.array(pil).astype(float)
@@ -454,9 +636,17 @@ with colB:
     bscan_npz = None
 
     if bscan_input_mode == "Image (recommended)":
-        bscan_file = st.file_uploader("Upload B-scan image", type=["png","jpg","jpeg"], key="bscan_img_main")
+        bscan_file = st.file_uploader(
+            "Upload B-scan image",
+            type=["png","jpg","jpeg"],
+            key="bscan_img_main"
+        )
     else:
-        bscan_npz = st.file_uploader("Upload B-scan NPZ volume", type=["npz"], key="bscan_npz_main")
+        bscan_npz = st.file_uploader(
+            "Upload B-scan NPZ volume",
+            type=["npz"],
+            key="bscan_npz_main"
+        )
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ============================================================
@@ -473,6 +663,8 @@ if analysis_trigger:
     run_label_b = None
     run_conf = 0.0
     run_severity = 0.0
+    q_rnflt = None
+    q_bscan = None
 
     # RNFLT analysis
     if rnflt_arr is not None:
@@ -509,7 +701,10 @@ if analysis_trigger:
                 c3.metric("Std Dev", "-")
             c4.metric("Cluster", str(cluster))
 
-            st.markdown(f"**RNFLT Scan Quality:** {q_rnflt:.1f}% — (sharp:{qmeta_rnflt['sharp_score']:.1f}, snr:{qmeta_rnflt['snr_score']:.1f})")
+            st.markdown(
+                f"**RNFLT Scan Quality:** {q_rnflt:.1f}% — "
+                f"(sharp: {qmeta_rnflt['sharp_score']:.1f}, snr: {qmeta_rnflt['snr_score']:.1f})"
+            )
 
             fig, axes = plt.subplots(1, 3, figsize=(18,6))
             im0 = axes[0].imshow(rnflt_arr, cmap='turbo'); axes[0].axis('off'); axes[0].set_title("RNFLT Map")
@@ -526,7 +721,7 @@ if analysis_trigger:
         except Exception as e:
             st.error(f"RNFLT Error: {e}")
 
-    # B-scan analysis
+    # B-scan analysis (image mode)
     if bscan_file:
         try:
             pil = Image.open(bscan_file).convert("L")
@@ -547,7 +742,10 @@ if analysis_trigger:
             col1, col2 = st.columns(2)
             col1.metric("CNN Prediction", run_label_b)
             col2.metric("Confidence", f"{run_conf:.2f}%")
-            st.markdown(f"**B-scan Quality:** {q_bscan:.1f}% — (sharp:{qmeta_bscan['sharp_score']:.1f}, snr:{qmeta_bscan['snr_score']:.1f})")
+            st.markdown(
+                f"**B-scan Quality:** {q_bscan:.1f}% — "
+                f"(sharp: {qmeta_bscan['sharp_score']:.1f}, snr: {qmeta_bscan['snr_score']:.1f})"
+            )
             st.markdown(render_severity(run_conf), unsafe_allow_html=True)
 
             heat = gradcam(batch, b_model) if b_model else None
@@ -568,10 +766,20 @@ if analysis_trigger:
         except Exception as e:
             st.error(f"B-Scan Error: {e}")
 
+    # TODO: B-scan NPZ mode could be added similarly if you want
+
     # overall severity display
     st.markdown("<hr>", unsafe_allow_html=True)
     st.markdown("<h3 style='text-align:center; color:#39ff14;'>Overall Severity Index</h3>", unsafe_allow_html=True)
     st.markdown(render_severity(run_severity), unsafe_allow_html=True)
+
+    # Overall scan quality (average of rnflt + bscan if available)
+    qual_values = []
+    if q_rnflt is not None:
+        qual_values.append(q_rnflt)
+    if q_bscan is not None:
+        qual_values.append(q_bscan)
+    overall_quality = float(np.mean(qual_values)) if qual_values else 0.0
 
     # save run context into session_state for PDF + chatbot
     if run_figs:
@@ -582,13 +790,11 @@ if analysis_trigger:
             "rnflt_severity": run_severity,
             "bscan_label": run_label_b,
             "bscan_conf": run_conf,
-            # quality: average of available
-            "quality": float(np.mean([v for v in [ (compute_quality_from_array(rnflt_arr)[0] if rnflt_arr is not None else None),
-                                                  (compute_quality_from_image_pil(Image.open(bscan_file).convert('L'))[0] if bscan_file else None) ] if v is not None]) if True else 0.0)
+            "quality": overall_quality
         }
         # quick downloads
         png_bytes = fig_to_png(run_figs[0])
-        st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png")
+        st.download_button("📸 Download RNFLT PNG", data=png_bytes, file_name="oculaire_rnflt.png", mime="image/png")
         if st.button("📄 Generate Full Medical Report (PDF)"):
             st.session_state['trigger_pdf'] = True
 
@@ -604,7 +810,10 @@ def build_scan_summary_for_prompt():
         return "No scan loaded in session."
     rm = ctx.get('rnflt_metrics')
     if rm:
-        parts.append(f"RNFLT Mean {rm.get('mean',0):.2f} µm, Std {rm.get('std',0):.2f} µm, Min {rm.get('min',0):.2f}, Max {rm.get('max',0):.2f}.")
+        parts.append(
+            f"RNFLT Mean {rm.get('mean',0):.2f} µm, Std {rm.get('std',0):.2f} µm, "
+            f"Min {rm.get('min',0):.2f}, Max {rm.get('max',0):.2f}."
+        )
     rc = ctx.get('rnflt_cluster')
     if rc:
         parts.append(f"RNFLT label: {rc}.")
@@ -624,13 +833,29 @@ def ask_glaucoma_assistant(question, history, api_key):
     if not api_key or not api_key.strip():
         return "⚠️ Please configure your Google Gemini API key (see sidebar)."
 
-    system_instruction = """You are a specialized medical AI assistant focused exclusively on glaucoma, OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, and glaucoma diagnosis/treatment.
-Answer concisely (<= 200 words) and include a brief disclaimer that this is educational information not medical advice.
-If user asks to 'explain my scan' or similar, use the provided scan summary context to explain results and provide practical next steps (tests to request, urgency)."""
+    system_instruction = (
+        "You are a specialized medical AI assistant focused exclusively on glaucoma, "
+        "OCT imaging, RNFLT measurements, optic nerve health, intraocular pressure, "
+        "and glaucoma diagnosis/treatment.\n"
+        "Answer concisely (<= 200 words) and include a brief disclaimer that this is "
+        "educational information, not medical advice.\n"
+        "If user asks to 'explain my scan' or similar, use the provided scan summary "
+        "context to explain results and provide practical next steps "
+        "(tests to request, urgency)."
+    )
 
-    # detect explain intent
     q_lower = question.lower()
-    include_scan = any(kw in q_lower for kw in ["explain my scan", "explain my result", "explain the scan", "explain my rnflt", "explain my b-scan", "explain this scan"])
+    include_scan = any(
+        kw in q_lower
+        for kw in [
+            "explain my scan",
+            "explain my result",
+            "explain the scan",
+            "explain my rnflt",
+            "explain my b-scan",
+            "explain this scan"
+        ]
+    )
     scan_summary = build_scan_summary_for_prompt() if include_scan else ""
 
     try:
@@ -642,7 +867,9 @@ If user asks to 'explain my scan' or similar, use the provided scan summary cont
                 role = "user" if msg["role"] == "user" else "assistant"
                 chat_history.append({"role": role, "parts": [msg["content"]]})
             chat = model.start_chat(history=chat_history)
-            prompt = system_instruction + ("\n\nScan summary: " + scan_summary if include_scan else "")
+            prompt = system_instruction
+            if include_scan:
+                prompt += "\n\nScan summary: " + scan_summary
             prompt += f"\n\nUser question: {question}"
             response = chat.send_message(prompt)
             return response.text
@@ -651,7 +878,10 @@ If user asks to 'explain my scan' or similar, use the provided scan summary cont
             for msg in history[-8:]:
                 role = "User" if msg["role"] == "user" else "Assistant"
                 conversation_context += f"{role}: {msg['content']}\n\n"
-            full_prompt = system_instruction + ("\n\nScan summary: " + scan_summary if include_scan else "") + f"\n\n{conversation_context}User: {question}\n\nAssistant:"
+            full_prompt = system_instruction
+            if include_scan:
+                full_prompt += "\n\nScan summary: " + scan_summary
+            full_prompt += f"\n\n{conversation_context}User: {question}\n\nAssistant:"
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
             response = requests.post(
                 url,
@@ -678,16 +908,32 @@ If user asks to 'explain my scan' or similar, use the provided scan summary cont
 st.markdown('<div class="floating-expander">', unsafe_allow_html=True)
 with st.expander("💬 Ask AI assistant", expanded=False):
     st.markdown("<div class='chat-header'>🤖 Glaucoma Q&A Assistant</div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:#b8ffb8; font-size:13px; margin-bottom:12px;'>Ask me anything about glaucoma, OCT imaging, RNFLT, or request 'explain my scan'</p>", unsafe_allow_html=True)
+    st.markdown(
+        "<p style='text-align:center; color:#b8ffb8; font-size:13px; margin-bottom:12px;'>"
+        "Ask me anything about glaucoma, OCT imaging, RNFLT, or type <b>explain my scan</b> "
+        "after running an analysis.</p>",
+        unsafe_allow_html=True
+    )
 
     # show history
     for msg in st.session_state.chat_history:
         if msg["role"] == "user":
-            st.markdown(f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='user-msg'><strong>You:</strong> {msg['content']}</div>",
+                unsafe_allow_html=True
+            )
         else:
-            st.markdown(f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='assistant-msg'><strong>🤖:</strong> {msg['content']}</div>",
+                unsafe_allow_html=True
+            )
 
-    user_question = st.text_input("Your question:", key="chat_input", placeholder="e.g., Explain my scan; What does RNFLT thinning mean?", label_visibility="collapsed")
+    user_question = st.text_input(
+        "Your question:",
+        key="chat_input",
+        placeholder="e.g., Explain my scan; What does RNFLT thinning mean?",
+        label_visibility="collapsed"
+    )
     col1, col2 = st.columns([4,1])
     with col1:
         send_btn = st.button("📤 Send", use_container_width=True)
@@ -700,7 +946,11 @@ with st.expander("💬 Ask AI assistant", expanded=False):
         else:
             with st.spinner("🔍 Generating answer..."):
                 st.session_state.chat_history.append({"role": "user", "content": user_question})
-                reply = ask_glaucoma_assistant(user_question, st.session_state.chat_history, API_KEY)
+                reply = ask_glaucoma_assistant(
+                    user_question,
+                    st.session_state.chat_history,
+                    API_KEY
+                )
                 st.session_state.chat_history.append({"role": "assistant", "content": reply})
             try:
                 st.experimental_rerun()
@@ -727,13 +977,51 @@ def generate_full_pdf(figs,
                       bscan_conf=None,
                       quality=None):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=40, bottomMargin=40, leftMargin=50, rightMargin=50)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        topMargin=40,
+        bottomMargin=40,
+        leftMargin=50,
+        rightMargin=50
+    )
     styles = getSampleStyleSheet()
-    title = ParagraphStyle("TitleGlow", parent=styles["Title"], fontSize=28, textColor=colors.HexColor("#00eaff"), leading=32, alignment=1)
-    subtitle = ParagraphStyle("Subtitle", parent=styles["Heading2"], fontSize=14, textColor=colors.HexColor("#ff40c4"), alignment=1, leading=18)
-    header_green = ParagraphStyle("HeaderGreen", parent=styles["Heading2"], textColor=colors.HexColor("#39ff14"), fontSize=18)
-    clinical_blue = ParagraphStyle("ClinicalBlue", parent=styles["BodyText"], fontSize=11, leading=16, textColor=colors.HexColor("#0b6aff"))
-    body_small_blue = ParagraphStyle("SmallBlue", parent=styles["BodyText"], fontSize=9, leading=12, textColor=colors.HexColor("#0b6aff"))
+    title = ParagraphStyle(
+        "TitleGlow",
+        parent=styles["Title"],
+        fontSize=28,
+        textColor=colors.HexColor("#00eaff"),
+        leading=32,
+        alignment=1
+    )
+    subtitle = ParagraphStyle(
+        "Subtitle",
+        parent=styles["Heading2"],
+        fontSize=14,
+        textColor=colors.HexColor("#ff40c4"),
+        alignment=1,
+        leading=18
+    )
+    header_green = ParagraphStyle(
+        "HeaderGreen",
+        parent=styles["Heading2"],
+        textColor=colors.HexColor("#39ff14"),
+        fontSize=18
+    )
+    clinical_blue = ParagraphStyle(
+        "ClinicalBlue",
+        parent=styles["BodyText"],
+        fontSize=11,
+        leading=16,
+        textColor=colors.HexColor("#0b6aff")
+    )
+    body_small_blue = ParagraphStyle(
+        "SmallBlue",
+        parent=styles["BodyText"],
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#0b6aff")
+    )
 
     story = []
 
@@ -747,7 +1035,7 @@ def generate_full_pdf(figs,
 
     metadata = [
         ["Report Generated:", gen_date],
-        ["Analysis Type:", "RNFLT + B-Scan" if (figs and len(figs)>0) else "RNFLT or B-Scan"],
+        ["Analysis Type:", "RNFLT + B-Scan" if (figs and len(figs) > 0) else "RNFLT or B-Scan"],
         ["AI Model Version:", "OCULAIRE v5.0 (2024)"],
         ["Report ID:", report_id],
     ]
@@ -765,13 +1053,26 @@ def generate_full_pdf(figs,
     if (rnflt_cluster == "Glaucoma-like") or (bscan_label == "Glaucoma-like"):
         risk_color = colors.HexColor("#ff6b6b")
         risk_text = "⚠️ ABNORMAL PATTERNS DETECTED"
-        risk_level = ("HIGH" if (rnflt_severity or 0) >= 60 else "MODERATE" if (rnflt_severity or 0) >= 30 else "LOW-MODERATE")
+        risk_level = (
+            "HIGH"
+            if (rnflt_severity or 0) >= 60 else
+            "MODERATE"
+            if (rnflt_severity or 0) >= 30 else
+            "LOW-MODERATE"
+        )
     else:
         risk_color = colors.HexColor("#39ff14")
         risk_text = "✅ NORMAL PATTERNS DETECTED"
         risk_level = "LOW"
 
-    exec_para = Paragraph(f"<b>Status:</b> {risk_text}<br/><b>Risk Level:</b> {risk_level}<br/><b>Severity Index:</b> {(rnflt_severity or 0):.1f}%<br/><b>CNN Confidence:</b> {(bscan_conf or 0):.1f}%<br/><b>Scan Quality:</b> {(quality or 0):.1f}%", clinical_blue)
+    exec_para = Paragraph(
+        f"<b>Status:</b> {risk_text}<br/>"
+        f"<b>Risk Level:</b> {risk_level}<br/>"
+        f"<b>Severity Index:</b> {(rnflt_severity or 0):.1f}%<br/>"
+        f"<b>CNN Confidence:</b> {(bscan_conf or 0):.1f}%<br/>"
+        f"<b>Scan Quality:</b> {(quality or 0):.1f}%",
+        clinical_blue
+    )
     box_table = Table([[exec_para]], colWidths=[450])
     box_table.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,-1), risk_color),
@@ -785,7 +1086,7 @@ def generate_full_pdf(figs,
     story.append(box_table)
     story.append(Spacer(1, 12))
 
-    # QR code (if available) — link points to a placeholder URL containing report_id
+    # QR code (if available)
     if QR_AVAILABLE:
         try:
             qr_url = f"https://example.com/oculaire/report/{report_id}"
@@ -794,7 +1095,6 @@ def generate_full_pdf(figs,
             qr.save(qr_buf, format="PNG")
             qr_buf.seek(0)
             img = RLImage(qr_buf, width=1.25*inch, height=1.25*inch)
-            # place to the right of metadata (simple append)
             story.append(Spacer(1, 6))
             story.append(img)
             story.append(Spacer(1, 6))
@@ -803,20 +1103,30 @@ def generate_full_pdf(figs,
 
     story.append(PageBreak())
 
-    # PAGE 2: Clinical interpretation and RNFLT stats (blue descriptions)
+    # PAGE 2: Clinical interpretation and RNFLT stats
     story.append(Paragraph("CLINICAL INTERPRETATION", header_green))
     story.append(Spacer(1, 10))
     if rnflt_cluster == "Glaucoma-like":
-        story.append(Paragraph("The AI analysis has detected <b>patterns consistent with glaucomatous changes</b> in your retinal nerve fiber layer structure. This includes thinning relative to the healthy reference database.", clinical_blue))
+        story.append(Paragraph(
+            "The AI analysis has detected <b>patterns consistent with glaucomatous changes</b> "
+            "in your retinal nerve fiber layer structure. This includes thinning relative to "
+            "the healthy reference database.",
+            clinical_blue
+        ))
     else:
-        story.append(Paragraph("The retinal nerve fiber layer thickness pattern appears <b>within normal ranges</b>. No significant signs of glaucomatous thinning are identified.", clinical_blue))
+        story.append(Paragraph(
+            "The retinal nerve fiber layer thickness pattern appears <b>within normal ranges</b>. "
+            "No significant signs of glaucomatous thinning are identified.",
+            clinical_blue
+        ))
     story.append(Spacer(1, 10))
-    story.append(Paragraph("<b>Key Findings</b>", clinical_blue)); story.append(Spacer(1,6))
+    story.append(Paragraph("<b>Key Findings</b>", clinical_blue))
+    story.append(Spacer(1,6))
 
     if rnflt_cluster == "Glaucoma-like":
         findings = [
             "- RNFL thinning detected in critical sectors.",
-            f"- { (rnflt_severity or 0):.1f }% of retinal area flagged as at-risk.",
+            f"- {(rnflt_severity or 0):.1f}% of retinal area flagged as at-risk.",
             "- Pattern deviation from healthy baseline exceeds threshold.",
             "- Suggestive of early-to-moderate glaucomatous damage."
         ]
@@ -862,36 +1172,78 @@ def generate_full_pdf(figs,
     story.append(PageBreak())
 
     # PAGE 4: Symptoms & Risk Factors
-    story.append(Paragraph("SYMPTOMS & RISK FACTORS", header_green)); story.append(Spacer(1,8))
+    story.append(Paragraph("SYMPTOMS & RISK FACTORS", header_green))
+    story.append(Spacer(1,8))
     story.append(Paragraph("<b>Symptoms to Monitor</b>", clinical_blue))
-    symptoms = ["Gradual peripheral vision loss", "Blurred vision or halos", "Difficulty adjusting to darkness", "Eye discomfort or headaches"]
-    for s in symptoms: story.append(Paragraph(f"- {s}", clinical_blue))
+    symptoms = [
+        "Gradual peripheral vision loss",
+        "Blurred vision or halos",
+        "Difficulty adjusting to darkness",
+        "Eye discomfort or headaches"
+    ]
+    for s in symptoms:
+        story.append(Paragraph(f"- {s}", clinical_blue))
     story.append(Spacer(1,8))
     story.append(Paragraph("<b>Major Risk Factors</b>", clinical_blue))
-    risks = ["Age >60", "Family history", "High IOP", "Thin corneas", "High myopia", "Diabetes / Hypertension"]
-    for r in risks: story.append(Paragraph(f"- {r}", clinical_blue))
+    risks = [
+        "Age >60",
+        "Family history of glaucoma",
+        "High intraocular pressure (IOP)",
+        "Thin corneas",
+        "High myopia",
+        "Diabetes / Hypertension"
+    ]
+    for r in risks:
+        story.append(Paragraph(f"- {r}", clinical_blue))
     story.append(PageBreak())
 
     # PAGE 5: Recommendations & Lifestyle
-    story.append(Paragraph("RECOMMENDATIONS & ACTION PLAN", header_green)); story.append(Spacer(1,8))
+    story.append(Paragraph("RECOMMENDATIONS & ACTION PLAN", header_green))
+    story.append(Spacer(1,8))
     if rnflt_cluster == "Glaucoma-like":
-        recs = ["Schedule ophthalmologist visit within 1–2 weeks.", "Request tonometry, visual fields, gonioscopy and dilated optic nerve exam.", "Bring this report to your appointment."]
+        recs = [
+            "Schedule ophthalmologist visit within 1–2 weeks.",
+            "Request tonometry, visual fields, gonioscopy and dilated optic nerve exam.",
+            "Bring this report to your appointment."
+        ]
     else:
-        recs = ["Continue routine annual eye exams.", "Document this baseline for future comparison.", "Consider earlier follow-up if any symptoms occur."]
-    for r in recs: story.append(Paragraph(f"- {r}", clinical_blue))
+        recs = [
+            "Continue routine annual eye exams.",
+            "Document this baseline for future comparison.",
+            "Consider earlier follow-up if any symptoms occur."
+        ]
+    for r in recs:
+        story.append(Paragraph(f"- {r}", clinical_blue))
     story.append(Spacer(1,8))
     story.append(Paragraph("<b>Lifestyle Recommendations</b>", clinical_blue))
-    lifestyle = ["Antioxidant-rich diet", "Regular aerobic activity", "Protect from UV exposure", "Limit caffeine, avoid smoking", "Sleep 7–9 hours"]
-    for l in lifestyle: story.append(Paragraph(f"- {l}", clinical_blue))
+    lifestyle = [
+        "Antioxidant-rich diet",
+        "Regular aerobic activity",
+        "Protect from UV exposure",
+        "Limit caffeine, avoid smoking",
+        "Sleep 7–9 hours"
+    ]
+    for l in lifestyle:
+        story.append(Paragraph(f"- {l}", clinical_blue))
     story.append(PageBreak())
 
     # PAGE 6: Disclaimers & References
-    story.append(Paragraph("IMPORTANT MEDICAL DISCLAIMER", header_green)); story.append(Spacer(1,8))
-    story.append(Paragraph("This OCULAIRE report is generated by an AI screening tool for research and educational purposes only. It is not a clinical diagnosis. Always consult an ophthalmologist for medical decisions.", clinical_blue))
+    story.append(Paragraph("IMPORTANT MEDICAL DISCLAIMER", header_green))
+    story.append(Spacer(1,8))
+    story.append(Paragraph(
+        "This OCULAIRE report is generated by an AI screening tool for research and educational purposes only. "
+        "It is not a clinical diagnosis. Always consult an ophthalmologist for medical decisions.",
+        clinical_blue
+    ))
     story.append(Spacer(1,8))
     story.append(Paragraph("<b>Methodology & References</b>", header_green))
-    refs = ["Weinreb RN et al., JAMA 2014", "Tham YC et al., Ophthalmology 2014", "European Glaucoma Society Guidelines 2021"]
-    for ref in refs: story.append(Paragraph(f"- {ref}", body_small_blue))
+    refs = [
+        "Weinreb RN et al., JAMA 2014",
+        "Tham YC et al., Ophthalmology 2014",
+        "European Glaucoma Society Guidelines 2021"
+    ]
+    for ref in refs:
+        story.append(Paragraph(f"- {ref}", body_small_blue))
 
     doc.build(story)
     buffer.seek(0)
@@ -916,7 +1268,13 @@ if st.session_state.get("trigger_pdf", False):
             )
             st.markdown("<hr>", unsafe_allow_html=True)
             st.subheader("📄 Download Full OCULAIRE Medical Report")
-            st.download_button(label="📄 Download Full PDF Report (6 Pages)", data=final_pdf, file_name="OCULAIRE_Full_Report.pdf", mime="application/pdf", use_container_width=True)
+            st.download_button(
+                label="📄 Download Full PDF Report (6 Pages)",
+                data=final_pdf,
+                file_name="OCULAIRE_Full_Report.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
         except Exception as e:
             st.error(f"PDF generation error: {e}")
     else:
@@ -925,4 +1283,9 @@ if st.session_state.get("trigger_pdf", False):
 
 # Footer
 st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center;color:#b8ffb8;padding:6px;'>OCULAIRE Neon Lab v5 — For research use only</div>", unsafe_allow_html=True)
+st.markdown(
+    "<div style='text-align:center;color:#b8ffb8;padding:6px;'>"
+    "OCULAIRE Neon Lab v5 — For research use only"
+    "</div>",
+    unsafe_allow_html=True
+)
