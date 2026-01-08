@@ -229,6 +229,19 @@ def process_npz(f):
         st.error(f"Error reading NPZ: {e}")
         return None, None
 
+def is_probably_rnflt_map(arr):
+    if arr.ndim != 2:
+        return False
+
+    mean_val = np.nanmean(arr)
+    if not (20 < mean_val < 200):
+        return False
+
+    gy, gx = np.gradient(arr)
+    grad_energy = np.nanmean(np.abs(gx)) + np.nanmean(np.abs(gy))
+
+    return grad_energy < 25
+
 def compute_risk_map(rnflt, healthy, threshold=-10):
     if rnflt.shape != healthy.shape:
         healthy = cv2.resize(healthy, (rnflt.shape[1], rnflt.shape[0]))
@@ -247,6 +260,21 @@ def preprocess_bscan(image_pil, size=(224,224)):
     arr_rgb = np.repeat(arr_res[..., None], 3, axis=-1)
     batch = np.expand_dims(arr_rgb, axis=0).astype(np.float32)
     return batch, arr_res
+
+
+def is_probably_bscan(pil_img):
+    gray = np.array(pil_img.convert("L"))
+    if gray.ndim != 2:
+        return False
+
+    edges = cv2.Canny(gray, 50, 150)
+    h_edges = np.sum(edges, axis=1)
+    v_edges = np.sum(edges, axis=0)
+
+    horiz_ratio = np.std(h_edges) / (np.std(v_edges) + 1e-6)
+    lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+
+    return horiz_ratio > 1.4 and lap_var > 40
 
 def gradcam(batch, model):
     try:
