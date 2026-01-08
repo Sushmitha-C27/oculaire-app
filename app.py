@@ -217,6 +217,9 @@ def process_npz(f):
         if arr.ndim == 3:
             arr = arr[0, :, :]
         arr = arr.astype(float)
+        if arr.ndim != 2 or not is_probably_rnflt_map(arr):
+           st.error("❌ Invalid RNFLT NPZ file. Thickness structure not detected.")
+           return None, None
         vals = arr.flatten()
         metrics = {
             "mean": float(np.nanmean(vals)),
@@ -463,7 +466,12 @@ with colA:
         if rnflt_image:
             pil = Image.open(rnflt_image).convert("L")
             arr = np.array(pil).astype(float)
-            rnflt_arr = arr
+            if not is_probably_rnflt_map(arr):
+               st.error("❌ Invalid RNFLT input. This does not appear to be an RNFLT thickness map.")
+               rnflt_arr = None
+               rnflt_metrics = None
+            else:
+                rnflt_arr = arr
             rnflt_pil = pil
             vals = arr.flatten()
             rnflt_metrics = {
@@ -558,7 +566,10 @@ if analysis_trigger:
     if bscan_file:
         try:
             pil = Image.open(bscan_file).convert("L")
-            batch, proc = preprocess_bscan(pil)
+            if not is_probably_bscan(pil):
+               st.error("❌ Invalid B-scan image. Non-OCT image rejected.")
+            else:
+                batch, proc = preprocess_bscan(pil)
             # compute quality
             q_bscan, qmeta_bscan = compute_quality_from_image_pil(pil)
 
